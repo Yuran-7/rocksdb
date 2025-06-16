@@ -43,3 +43,9 @@ add_executable(multi_processes_example
   multi_processes_example.cc)
 target_link_libraries(multi_processes_example
   ${ROCKSDB_LIB})
+
+add_executable(workload_runner
+  EXCLUDE_FROM_ALL
+  workload_runner.cpp)
+target_link_libraries(workload_runner
+  ${ROCKSDB_LIB})

@@ -2204,7 +2204,7 @@ Status DB::Open(const Options& options, const std::string& dbname,
   DBOptions db_options(options);
   ColumnFamilyOptions cf_options(options);
   std::vector<ColumnFamilyDescriptor> column_families;
-  column_families.emplace_back(kDefaultColumnFamilyName, cf_options);
+  column_families.emplace_back(kDefaultColumnFamilyName, cf_options);   // default
   if (db_options.persist_stats_to_disk) {
     column_families.emplace_back(kPersistentStatsColumnFamilyName, cf_options);
   }
@@ -2230,17 +2230,17 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
                 const std::vector<ColumnFamilyDescriptor>& column_families,
                 std::vector<ColumnFamilyHandle*>* handles,
                 std::unique_ptr<DB>* dbptr) {
-  const bool kSeqPerBatch = true;
-  const bool kBatchPerTxn = true;
-  ThreadStatusUtil::SetEnableTracking(db_options.enable_thread_tracking);
-  ThreadStatusUtil::SetThreadOperation(ThreadStatus::OperationType::OP_DBOPEN);
-  bool can_retry = false;
+  const bool kSeqPerBatch = true;   // true表示，整个 WriteBatch 使用一个共享的 sequence number，保证batch是原子的
+  const bool kBatchPerTxn = true;   // 每个 batch 表示一次完整的事务 commit 单位
+  ThreadStatusUtil::SetEnableTracking(db_options.enable_thread_tracking);   // 开启线程追踪功能，enable_thread_tracking默认是false
+  ThreadStatusUtil::SetThreadOperation(ThreadStatus::OperationType::OP_DBOPEN); // return; 啥也不干
+  bool can_retry = false;   // 默认不重试
   Status s;
   do {
     s = DBImpl::Open(db_options, dbname, column_families, handles, dbptr,
                      !kSeqPerBatch, kBatchPerTxn, can_retry, &can_retry);
   } while (!s.ok() && can_retry);
-  ThreadStatusUtil::ResetThreadStatus();
+  ThreadStatusUtil::ResetThreadStatus();    // 清除当前线程设置的状态
   return s;
 }
 
@@ -2386,6 +2386,9 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   const WriteOptions write_options(Env::IOActivity::kDBOpen);
   const ReadOptions read_options(Env::IOActivity::kDBOpen);
 
+  /*
+  第一步：检查参数合法性、构建 DBImpl 实例、创建必要的目录、初始化错误恢复机制等。
+  */
   Status s = ValidateOptionsByTable(db_options, column_families);
   if (!s.ok()) {
     return s;
@@ -2398,24 +2401,26 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   *dbptr = nullptr;
   assert(handles);
-  handles->clear();
+  handles->clear(); // 清空用户传入的 ColumnFamilyHandle 列表
 
   size_t max_write_buffer_size = 0;
   MinAndMaxPreserveSeconds preserve_info;
-  for (const auto& cf : column_families) {
+  for (const auto& cf : column_families) {  // 遍历所有 CF，记录最大的 write_buffer_size（用于后面 WAL 空间预留）
     max_write_buffer_size =
         std::max(max_write_buffer_size, cf.options.write_buffer_size);
-    preserve_info.Combine(cf.options);
+    preserve_info.Combine(cf.options);  // 遍历，保留最大最小seconds（用于 timestamp 保留）
   }
 
   auto impl = std::make_unique<DBImpl>(db_options, dbname, seq_per_batch,
-                                       batch_per_txn);
-  if (!impl->immutable_db_options_.info_log) {
+                                       batch_per_txn);  // 创建 DBImpl 实例，传入 seq_per_batch、batch_per_txn 控制恢复策略
+  if (!impl->immutable_db_options_.info_log) {  // 如果日志未创建成功，则使用预记录的错误状态返回
     s = impl->init_logger_creation_s_;
     return s;
   } else {
-    assert(impl->init_logger_creation_s_.ok());
+    assert(impl->init_logger_creation_s_.ok()); // 否则必须成功
   }
+  // 创建 WAL 目录（如果不存在）
+  // 如果用户设置了 wal_dir，这里就是那个路径；否则等于 dbname
   s = impl->env_->CreateDirIfMissing(impl->immutable_db_options_.GetWalDir());
   if (s.ok()) {
     std::vector<std::string> paths;
@@ -2437,17 +2442,20 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     // For recovery from NoSpace() error, we can only handle
     // the case where the database is stored in a single path
     if (paths.size() <= 1) {
-      impl->error_handler_.EnableAutoRecovery();
+      impl->error_handler_.EnableAutoRecovery();    // 如果只使用了一个 DB 路径，允许自动处理 “磁盘写满” 的错误恢复
     }
   }
   if (s.ok()) {
-    s = impl->CreateArchivalDirectory();
+    s = impl->CreateArchivalDirectory();    // 创建归档目录（用于 WAL 回收）
   }
   if (!s.ok()) {
     return s;
   }
 
-  impl->wal_in_db_path_ = impl->immutable_db_options_.IsWalDirSameAsDBPath();
+  impl->wal_in_db_path_ = impl->immutable_db_options_.IsWalDirSameAsDBPath();   // 设置标记：WAL 是否和主 DB 路径相同（决定后续是否清理 .log.trash）
+  /*
+  第二步：恢复数据库，创建新的WAL编号，dummy WAL 记录，同步到磁盘
+  */
   RecoveryContext recovery_ctx;
   impl->options_mutex_.Lock();
   impl->mutex_.Lock();
@@ -2522,9 +2530,15 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
       }
     }
   }
+  /*
+  第三步：写入 MANIFEST（LogAndApply）
+  */
   if (s.ok()) {
     s = impl->LogAndApplyForRecovery(recovery_ctx);
   }
+  /*
+  第四步：初始化统计 Column Family（可选）
+  */
 
   if (s.ok() && !impl->immutable_db_options_.write_identity_file) {
     // On successful recovery, delete an obsolete IDENTITY file to avoid DB ID
@@ -2544,6 +2558,9 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     impl->PrepopulateSeqnoToTimeMapping(preserve_info);
   }
 
+  /*
+  第五步：创建 ColumnFamily handle
+  */
   if (s.ok()) {
     // set column family handles
     for (const auto& cf : column_families) {
@@ -2580,6 +2597,9 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     }
   }
 
+  /*
+  第六步：清理无用文件 & 启动调度器。持久化配置，清理旧文件，启动调度器，回传指针
+  */
   if (s.ok() && impl->immutable_db_options_.persist_stats_to_disk) {
     // Install SuperVersion for hidden column family
     assert(impl->persist_stats_cf_handle_);

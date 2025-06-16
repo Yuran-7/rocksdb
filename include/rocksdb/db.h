@@ -150,6 +150,8 @@ class DB {
                      DB** dbptr) {
     std::unique_ptr<DB> smart_ptr;
     Status s = Open(options, name, &smart_ptr);
+    // 则将智能指针管理的原始指针的所有权转移给调用者提供的 dbptr
+    // release() 方法会返回原始指针，并使智能指针不再拥有该对象
     *dbptr = smart_ptr.release();
     return s;
   }

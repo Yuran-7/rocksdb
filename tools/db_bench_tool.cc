@@ -827,7 +827,7 @@ DEFINE_int32(checksum_type,
 DEFINE_bool(statistics, false, "Database statistics");
 DEFINE_int32(stats_level, ROCKSDB_NAMESPACE::StatsLevel::kExceptDetailedTimers,
              "stats level for statistics");
-DEFINE_string(statistics_string, "", "Serialized statistics string");
+DEFINE_string(statistics_string, "", "Serialized statistics string"); // 听说可以自定义，等我回头来看看
 static class std::shared_ptr<ROCKSDB_NAMESPACE::Statistics> dbstats;
 
 DEFINE_int64(writes, -1,
@@ -3041,6 +3041,7 @@ class Benchmark {
     return timestamp_emulator->Get() - timestamp > FLAGS_time_range;
   }
 
+  // incude/rocksdb/compaction_filter.h
   class ExpiredTimeFilter : public CompactionFilter {
    public:
     explicit ExpiredTimeFilter(
@@ -3452,15 +3453,15 @@ class Benchmark {
   }
 
   void Run(ToolHooks& hooks) {
-    if (!SanityCheck()) {
+    if (!SanityCheck()) { // 检查参数是否有效，compression_ratio 是否在 0 和 1 之间
       ErrorExit();
     }
     Open(&open_options_, hooks);
     PrintHeader(open_options_);
-    std::stringstream benchmark_stream(FLAGS_benchmarks);
+    std::stringstream benchmark_stream(FLAGS_benchmarks); // --benchmarks=fillseq,readrandom...
     std::string name;
     std::unique_ptr<ExpiredTimeFilter> filter;
-    while (std::getline(benchmark_stream, name, ',')) {
+    while (std::getline(benchmark_stream, name, ',')) { // 简单的string类型无法使用getline
       // Sanitize parameters
       num_ = FLAGS_num;
       reads_ = (FLAGS_reads < 0 ? FLAGS_num : FLAGS_reads);
@@ -3469,16 +3470,17 @@ class Benchmark {
       value_size = FLAGS_value_size;
       key_size_ = FLAGS_key_size;
       entries_per_batch_ = FLAGS_batch_size;
-      writes_before_delete_range_ = FLAGS_writes_before_delete_range;
+      // 下面四个变量配合使用，10000，5000，100，5
+      writes_before_delete_range_ = FLAGS_writes_before_delete_range;   // 执行多少次写之后触发下一次 DeleteRange
       writes_per_range_tombstone_ = FLAGS_writes_per_range_tombstone;
       range_tombstone_width_ = FLAGS_range_tombstone_width;
       max_num_range_tombstones_ = FLAGS_max_num_range_tombstones;
-      write_options_ = WriteOptions();
-      read_random_exp_range_ = FLAGS_read_random_exp_range;
-      if (FLAGS_sync) {
+      write_options_ = WriteOptions();  // Options.h中的结构体，WriteOptions()是构造函数
+      read_random_exp_range_ = FLAGS_read_random_exp_range; // double，更早插入的key被偏斜的访问
+      if (FLAGS_sync) { // 默认是false
         write_options_.sync = true;
       }
-      write_options_.disableWAL = FLAGS_disable_wal;
+      write_options_.disableWAL = FLAGS_disable_wal;    // 默认false
       write_options_.rate_limiter_priority =
           FLAGS_rate_limit_auto_wal_flush ? Env::IO_USER : Env::IO_TOTAL;
       read_options_ = ReadOptions(FLAGS_verify_checksum, true);
@@ -3495,6 +3497,8 @@ class Benchmark {
       read_options_.auto_refresh_iterator_with_snapshot =
           FLAGS_auto_refresh_iterator_with_snapshot;
 
+      // void返回值类型，(Benchmark::*)这是一个指向 Benchmark 类的成员函数的指针，method指针变量的名字
+      // 这个成员函数的参数是一个 ThreadState* 指针，初始化为nullptr
       void (Benchmark::*method)(ThreadState*) = nullptr;
       void (Benchmark::*post_process_method)() = nullptr;
 
@@ -3503,6 +3507,8 @@ class Benchmark {
 
       int num_repeat = 1;
       int num_warmup = 0;
+      // 检查基准测试名称是否包含方括号 `[]`，这通常用于传递额外的参数给特定的基准测试，
+      // 例如重复次数 (如 `X5` 表示重复5次) 或预热次数 (如 `W2` 表示预热2次)。
       if (!name.empty() && *name.rbegin() == ']') {
         auto it = name.find('[');
         if (it == std::string::npos) {
@@ -3536,7 +3542,8 @@ class Benchmark {
       // and fill the max level with fillseq and filluniquerandom, respectively
       if (name == "fillseqdeterministic" ||
           name == "filluniquerandomdeterministic") {
-        if (!FLAGS_disable_auto_compactions) {
+            // disable_auto_compactions为true，也就是必须关闭自动合并，程序才能继续执行下去
+        if (!FLAGS_disable_auto_compactions) {  // disable_auto_compactions默认是false
           fprintf(stderr,
                   "Please disable_auto_compactions in FillDeterministic "
                   "benchmark\n");
@@ -3550,16 +3557,16 @@ class Benchmark {
         }
         fresh_db = true;
         if (name == "fillseqdeterministic") {
-          method = &Benchmark::WriteSeqDeterministic;
+          method = &Benchmark::WriteSeqDeterministic;   // 顺序写入，并且写入的顺序是固定的，不涉及随机性，便于重现实验
         } else {
-          method = &Benchmark::WriteUniqueRandomDeterministic;
+          method = &Benchmark::WriteUniqueRandomDeterministic;  // 键的顺序是打乱的，但每个键都是唯一的，随机顺序是可重复生成的
         }
       } else if (name == "fillseq") {
-        fresh_db = true;
+        fresh_db = true;    // 指示是否应在运行特定基准测试之前创建一个全新的（空的）数据库
         method = &Benchmark::WriteSeq;
       } else if (name == "fillbatch") {
         fresh_db = true;
-        entries_per_batch_ = 1000;
+        entries_per_batch_ = 1000;  // 一个batch包含1000个条目
         method = &Benchmark::WriteSeq;
       } else if (name == "fillrandom") {
         fresh_db = true;
@@ -3570,25 +3577,26 @@ class Benchmark {
         if (num_threads > 1) {
           fprintf(stderr,
                   "filluniquerandom and fillanddeleteuniquerandom "
-                  "multithreaded not supported, use 1 thread");
+                  "multithreaded not supported, use 1 thread"); // 不支持多线程
           num_threads = 1;
         }
         method = &Benchmark::WriteUniqueRandom;
-      } else if (name == "overwrite") {
+      } else if (name == "overwrite") { // 不创建新的数据库
         method = &Benchmark::WriteRandom;
       } else if (name == "fillsync") {
         fresh_db = true;
-        num_ /= 1000;
-        write_options_.sync = true;
+        num_ /= 1000;   // 避免每插入一个就强制同步到磁盘
+        write_options_.sync = true; // sync默认是false
         method = &Benchmark::WriteRandom;
       } else if (name == "fill100K") {
         fresh_db = true;
         num_ /= 1000;
-        value_size = 100 * 1000;
+        value_size = 100 * 1000;    // value的大小是100KB
         method = &Benchmark::WriteRandom;
       } else if (name == "readseq") {
         method = &Benchmark::ReadSequential;
       } else if (name == "readtorowcache") {
+        // 两个都为true，不会进入这个if，程序才能正常执行
         if (!FLAGS_use_existing_keys || !FLAGS_row_cache_size) {
           fprintf(stderr,
                   "Please set use_existing_keys to true and specify a "
@@ -3606,7 +3614,7 @@ class Benchmark {
         if (FLAGS_multiread_stride) {
           fprintf(stderr, "entries_per_batch = %" PRIi64 "\n",
                   entries_per_batch_);
-        }
+        }   // stderr不只是错误，也可以是调试信息
         method = &Benchmark::ReadRandom;
       } else if (name == "readrandomfast") {
         method = &Benchmark::ReadRandomFast;
@@ -3779,6 +3787,7 @@ class Benchmark {
         ErrorExit();
       }
 
+      // 如果要创建新数据库
       if (fresh_db) {
         if (FLAGS_use_existing_db) {
           fprintf(stdout, "%-12s : skipped (--use_existing_db is true)\n",
@@ -3799,6 +3808,7 @@ class Benchmark {
           }
           multi_dbs_.clear();
         }
+        // open_options_就是Options
         Open(&open_options_, hooks);  // use open_options for the last accessed
       }
 
@@ -3812,12 +3822,11 @@ class Benchmark {
           std::cout << "Restore path: [" << FLAGS_restore_dir << "]"
                     << std::endl;
         }
-        // A trace_file option can be provided both for trace and replay
-        // operations. But db_bench does not support tracing and replaying at
-        // the same time, for now. So, start tracing only when it is not a
-        // replay.
+        // trace_file 选项可以为 trace（追踪）和 replay（回放）操作提供。
+        // 但是 db_bench 目前不支持同时进行追踪和回放。
+        // 因此，仅当不是回放操作时才开始追踪。
         if (FLAGS_trace_file != "" && name != "replay") {
-          std::unique_ptr<TraceWriter> trace_writer;
+          std::unique_ptr<TraceWriter> trace_writer;    // 声明一个 TraceWriter 的智能指针，用于写入追踪数据
           Status s = NewFileTraceWriter(FLAGS_env, EnvOptions(),
                                         FLAGS_trace_file, &trace_writer);
           if (!s.ok()) {
@@ -3825,7 +3834,7 @@ class Benchmark {
                     s.ToString().c_str());
             ErrorExit();
           }
-          s = db_.db->StartTrace(trace_options_, std::move(trace_writer));
+          s = db_.db->StartTrace(trace_options_, std::move(trace_writer));  // 在数据库实例上开始追踪，传入追踪选项和追踪写入器
           if (!s.ok()) {
             fprintf(stderr, "Encountered an error starting a trace, %s\n",
                     s.ToString().c_str());
@@ -3835,26 +3844,28 @@ class Benchmark {
                   FLAGS_trace_file.c_str());
         }
         // Start block cache tracing.
+        // 开始块缓存追踪。
         if (!FLAGS_block_cache_trace_file.empty()) {
           // Sanity checks.
-          if (FLAGS_block_cache_trace_sampling_frequency <= 0) {
+          if (FLAGS_block_cache_trace_sampling_frequency <= 0) {    // 如果块缓存追踪的采样频率小于或等于0
             fprintf(stderr,
                     "Block cache trace sampling frequency must be higher than "
                     "0.\n");
             ErrorExit();
           }
-          if (FLAGS_block_cache_trace_max_trace_file_size_in_bytes <= 0) {
+          if (FLAGS_block_cache_trace_max_trace_file_size_in_bytes <= 0) {  // 如果块缓存追踪的最大文件大小小于或等于0
             fprintf(stderr,
                     "The maximum file size for block cache tracing must be "
                     "higher than 0.\n");
             ErrorExit();
           }
+          // TraceOptions结构体
           block_cache_trace_options_.max_trace_file_size =
               FLAGS_block_cache_trace_max_trace_file_size_in_bytes;
           block_cache_trace_options_.sampling_frequency =
               FLAGS_block_cache_trace_sampling_frequency;
-          std::unique_ptr<TraceWriter> block_cache_trace_writer;
-          Status s = NewFileTraceWriter(FLAGS_env, EnvOptions(),
+          std::unique_ptr<TraceWriter> block_cache_trace_writer;    // 声明一个 TraceWriter 的智能指针，用于写入块缓存追踪数据
+          Status s = NewFileTraceWriter(FLAGS_env, EnvOptions(),    // 创建一个文件追踪写入器用于块缓存
                                         FLAGS_block_cache_trace_file,
                                         &block_cache_trace_writer);
           if (!s.ok()) {
@@ -3863,6 +3874,7 @@ class Benchmark {
                     s.ToString().c_str());
             ErrorExit();
           }
+          // 在数据库实例上开始块缓存追踪
           s = db_.db->StartBlockCacheTrace(block_cache_trace_options_,
                                            std::move(block_cache_trace_writer));
           if (!s.ok()) {
@@ -3874,54 +3886,57 @@ class Benchmark {
           }
           fprintf(stdout, "Tracing block cache accesses to: [%s]\n",
                   FLAGS_block_cache_trace_file.c_str());
-        }
+        }   // 块缓存追踪结束
 
         if (num_warmup > 0) {
           printf("Warming up benchmark by running %d times\n", num_warmup);
         }
 
-        for (int i = 0; i < num_warmup; i++) {
-          RunBenchmark(num_threads, name, method);
+        for (int i = 0; i < num_warmup; i++) {  // 循环执行预热运行
+          RunBenchmark(num_threads, name, method);  // 调用 RunBenchmark 执行一次基准测试的预热运行
+                                                    // num_threads 是线程数, name 是基准测试名称, method 是要执行的测试函数
         }
 
         if (num_repeat > 1) {
           printf("Running benchmark for %d times\n", num_repeat);
         }
 
-        CombinedStats combined_stats;
-        for (int i = 0; i < num_repeat; i++) {
-          Stats stats = RunBenchmark(num_threads, name, method);
-          combined_stats.AddStats(stats);
-          if (FLAGS_confidence_interval_only) {
-            combined_stats.ReportWithConfidenceIntervals(name);
+        CombinedStats combined_stats;   // 创建一个 CombinedStats 对象，用于聚合多次运行的统计结果
+        for (int i = 0; i < num_repeat; i++) {  // num_repeat取自[]
+          Stats stats = RunBenchmark(num_threads, name, method);    // 调用 RunBenchmark 执行一次基准测试，并获取当次运行的统计数据
+          combined_stats.AddStats(stats);   // 将当次运行的统计数据添加到 CombinedStats 对象中
+          if (FLAGS_confidence_interval_only) { // 如果命令行标志指定只报告置信区间
+            combined_stats.ReportWithConfidenceIntervals(name); // 报告带有置信区间的统计结果
           } else {
-            combined_stats.Report(name);
+            combined_stats.Report(name);    // 报告标准的统计结果 (通常是最后一次运行的详细统计)
           }
         }
-        if (num_repeat > 1) {
-          combined_stats.ReportFinal(name);
+        if (num_repeat > 1) {   // 如果基准测试重复运行了多次
+          combined_stats.ReportFinal(name); // 报告多次运行的最终聚合统计结果 (例如平均值、标准差等)
         }
-      }
+      } // if (method != nullptr)
+      // 在基准测试的主要部分（包括预热和重复运行）执行完毕后，检查是否定义了一个特定的“后处理”成员函数。如果定义了，就调用该成员函数，以完成一些针对该基准测试的收尾工作
       if (post_process_method != nullptr) {
         (this->*post_process_method)();
       }
-    }
+    }   // while
 
-    if (secondary_update_thread_) {
-      secondary_update_stopped_.store(1, std::memory_order_relaxed);
-      secondary_update_thread_->join();
-      secondary_update_thread_.reset();
+    if (secondary_update_thread_) { // 检查是否存在辅助更新线程
+      // Stop the secondary update thread if it is running
+      secondary_update_stopped_.store(1, std::memory_order_relaxed);    // 设置原子标志 secondary_update_stopped_ 为 1，通知辅助线程停止工作。使用宽松内存序，因为这里的同步主要通过 join 实现。
+      secondary_update_thread_->join(); // 等待辅助更新线程执行完毕并退出。主线程会阻塞在此，直到辅助线程结束。
+      secondary_update_thread_.reset(); // 重置智能指针，释放辅助更新线程对象。
     }
 
     if (name != "replay" && FLAGS_trace_file != "") {
-      Status s = db_.db->EndTrace();
+      Status s = db_.db->EndTrace();    // 调用数据库实例的 EndTrace() 方法来停止追踪。
       if (!s.ok()) {
         fprintf(stderr, "Encountered an error ending the trace, %s\n",
                 s.ToString().c_str());
       }
     }
     if (!FLAGS_block_cache_trace_file.empty()) {
-      Status s = db_.db->EndBlockCacheTrace();
+      Status s = db_.db->EndBlockCacheTrace();  // 调用数据库实例的 EndBlockCacheTrace() 方法来停止块缓存追踪。
       if (!s.ok()) {
         fprintf(stderr,
                 "Encountered an error ending the block cache tracing, %s\n",
@@ -3932,17 +3947,17 @@ class Benchmark {
     if (FLAGS_statistics) {
       fprintf(stdout, "STATISTICS:\n%s\n", dbstats->ToString().c_str());
     }
-    if (FLAGS_simcache_size >= 0) {
-      fprintf(
+    if (FLAGS_simcache_size >= 0) { // 如果通过命令行标志配置了模拟缓存 (SimCache)
+      fprintf(  // 向标准输出打印模拟缓存的统计信息
           stdout, "SIMULATOR CACHE STATISTICS:\n%s\n",
           static_cast_with_check<SimCache>(cache_.get())->ToString().c_str());
     }
 
-    if (FLAGS_use_secondary_db) {
+    if (FLAGS_use_secondary_db) {   // 如果基准测试中使用了辅助数据库实例
       fprintf(stdout, "Secondary instance updated  %" PRIu64 " times.\n",
               secondary_db_updates_);
     }
-  }
+  } // Run
 
  private:
   std::shared_ptr<TimestampEmulator> timestamp_emulator_;
@@ -3974,7 +3989,7 @@ class Benchmark {
     SetPerfLevel(static_cast<PerfLevel>(shared->perf_level));
     perf_context.EnablePerLevelPerfContext();
     thread->stats.Start(thread->tid);
-    (arg->bm->*(arg->method))(thread);
+    (arg->bm->*(arg->method))(thread);  // 实际执行基准测试方法
     if (FLAGS_perf_level > ROCKSDB_NAMESPACE::PerfLevel::kDisable) {
       thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
                                get_perf_context()->ToString());
@@ -3992,32 +4007,33 @@ class Benchmark {
 
   Stats RunBenchmark(int n, Slice name,
                      void (Benchmark::*method)(ThreadState*)) {
-    SharedState shared;
+    SharedState shared; // 创建一个 SharedState 对象，用于线程间的同步和共享数据
     shared.total = n;
-    shared.num_initialized = 0;
-    shared.num_done = 0;
-    shared.start = false;
-    if (FLAGS_benchmark_write_rate_limit > 0) {
-      shared.write_rate_limiter.reset(
+    shared.num_initialized = 0; // 初始化已完成初始化的线程数量为 0
+    shared.num_done = 0;    // 初始化已完成工作的线程数量为 0
+    shared.start = false;   // 设置启动标志为 false，线程创建后会等待此标志变为 true，以实现所有线程同时开始工作
+    if (FLAGS_benchmark_write_rate_limit > 0) { // 如果通过命令行标志设置了写速率限制 (大于0表示启用)
+      shared.write_rate_limiter.reset(  // 重置 (或创建) 共享的写速率限制器
           NewGenericRateLimiter(FLAGS_benchmark_write_rate_limit));
     }
-    if (FLAGS_benchmark_read_rate_limit > 0) {
+    if (FLAGS_benchmark_read_rate_limit > 0) {  // 如果通过命令行标志设置了读速率限制 (大于0表示启用)
       shared.read_rate_limiter.reset(NewGenericRateLimiter(
           FLAGS_benchmark_read_rate_limit, 100000 /* refill_period_us */,
           10 /* fairness */, RateLimiter::Mode::kReadsOnly));
     }
 
-    std::unique_ptr<ReporterAgent> reporter_agent;
-    if (FLAGS_report_interval_seconds > 0) {
+    std::unique_ptr<ReporterAgent> reporter_agent;  // 声明一个 ReporterAgent 的智能指针，用于定期报告统计信息
+    if (FLAGS_report_interval_seconds > 0) {    // 如果通过命令行标志设置了报告间隔 (大于0表示启用)
       reporter_agent.reset(new ReporterAgent(FLAGS_env, FLAGS_report_file,
                                              FLAGS_report_interval_seconds));
     }
 
-    ThreadArg* arg = new ThreadArg[n];
+    ThreadArg* arg = new ThreadArg[n];  // 动态分配一个 ThreadArg 结构体数组，大小为 n，用于存储传递给每个线程的参数
 
+    // n就是num_threads
     for (int i = 0; i < n; i++) {
 #ifdef NUMA
-      if (FLAGS_enable_numa) {
+      if (FLAGS_enable_numa) {  // 默认为false
         // Performs a local allocation of memory to threads in numa node.
         int n_nodes = numa_num_task_nodes();  // Number of nodes in NUMA.
         numa_exit_on_error = 1;
@@ -4033,41 +4049,41 @@ class Benchmark {
         numa_free_nodemask(nodes);
       }
 #endif
-      arg[i].bm = this;
-      arg[i].method = method;
-      arg[i].shared = &shared;
+      arg[i].bm = this; // 将当前 Benchmark 对象的指针 (this) 赋给第 i 个线程的参数结构体
+      arg[i].method = method;   // 将指向具体测试逻辑的成员函数指针赋给第 i 个线程的参数结构体
+      arg[i].shared = &shared;  // 将共享状态对象的地址赋给第 i 个线程的参数结构体
       total_thread_count_++;
-      arg[i].thread = new ThreadState(i, total_thread_count_);
-      arg[i].thread->stats.SetReporterAgent(reporter_agent.get());
-      arg[i].thread->shared = &shared;
-      FLAGS_env->StartThread(ThreadBody, &arg[i]);
+      arg[i].thread = new ThreadState(i, total_thread_count_);   // 为第 i 个线程创建一个新的 ThreadState 对象，传入线程的局部ID (i) 和全局ID (total_thread_count_)
+      arg[i].thread->stats.SetReporterAgent(reporter_agent.get());  // 将 ReporterAgent (如果已创建) 设置给当前线程的统计对象，用于定期报告
+      arg[i].thread->shared = &shared;  // 再次确保线程状态中的共享指针指向正确的 SharedState 对象 (这行与 arg[i].shared = &shared; 效果类似，但作用于 ThreadState 内部)
+      FLAGS_env->StartThread(ThreadBody, &arg[i]);  // 使用环境对象 (FLAGS_env) 启动一个新线程，该线程将执行静态函数 ThreadBody，并将当前线程的参数结构体 (arg[i]) 的地址作为参数传递
     }
 
-    shared.mu.Lock();
-    while (shared.num_initialized < n) {
+    shared.mu.Lock();   // 对共享状态的互斥锁 (shared.mu) 加锁，以保护对共享变量 (num_initialized, start, num_done) 的访问
+    while (shared.num_initialized < n) {    // 循环等待，直到所有 n 个线程都完成了它们的初始化工作 (即 shared.num_initialized 达到 n)
       shared.cv.Wait();
     }
 
-    shared.start = true;
-    shared.cv.SignalAll();
-    while (shared.num_done < n) {
+    shared.start = true;    // 所有线程都已初始化完毕，设置启动标志为 true，通知所有线程可以开始执行基准测试的核心逻辑
+    shared.cv.SignalAll();  // 唤醒所有可能因等待 shared.start 变为 true 而在条件变量上等待的线程 (即所有已初始化的工作线程)
+    while (shared.num_done < n) {   // 循环等待，直到所有 n 个线程都完成了它们的基准测试工作 (即 shared.num_done 达到 n)
       shared.cv.Wait();
     }
-    shared.mu.Unlock();
+    shared.mu.Unlock(); // 所有线程都已完成工作，解锁共享状态的互斥锁
 
     // Stats for some threads can be excluded.
-    Stats merge_stats;
+    Stats merge_stats;  // 创建一个 Stats 对象，用于聚合所有线程的统计结果
     for (int i = 0; i < n; i++) {
-      merge_stats.Merge(arg[i].thread->stats);
+      merge_stats.Merge(arg[i].thread->stats);  // 将第 i 个线程的统计数据 (arg[i].thread->stats) 合并到总的 merge_stats 对象中
     }
-    merge_stats.Report(name);
+    merge_stats.Report(name);   // 调用 Report 方法，打印或报告聚合后的统计信息，使用基准测试名称 'name' 作为标识
 
     for (int i = 0; i < n; i++) {
-      delete arg[i].thread;
+      delete arg[i].thread; // 删除为第 i 个线程动态分配的 ThreadState 对象，释放内存       
     }
-    delete[] arg;
+    delete[] arg;   // 删除动态分配的 ThreadArg 结构体数组，释放内存
 
-    return merge_stats;
+    return merge_stats; // 返回包含所有线程聚合统计信息的 Stats 对象
   }
 
   template <OperationType kOpType, typename FnType, typename... Args>
@@ -4212,7 +4228,7 @@ class Benchmark {
                                    &cf_descs);
       db_opts.env = FLAGS_env;
       if (s.ok()) {
-        *opts = Options(db_opts, cf_descs[0].options);
+        *opts = Options(db_opts, cf_descs[0].options);  // Options继承了DBOptions和ColumnFamilyOptions
         return true;
       }
       fprintf(stderr, "Unable to load options file %s --- %s\n",
@@ -4888,11 +4904,11 @@ class Benchmark {
   }
 
   void Open(Options* opts, ToolHooks& hooks) {
-    if (!InitializeOptionsFromFile(opts)) {
+    if (!InitializeOptionsFromFile(opts)) { // 想要为true，FLAGS_options_file要不为空
       InitializeOptionsFromFlags(opts);
     }
 
-    InitializeOptionsGeneral(opts, hooks);
+    InitializeOptionsGeneral(opts, hooks);  // 调用OpenDb，它又调用Open
   }
 
   void OpenDb(Options options, ToolHooks& hooks, const std::string& db_name,
@@ -5135,96 +5151,94 @@ class Benchmark {
     return FLAGS_sine_a * sin((FLAGS_sine_b * x) + FLAGS_sine_c) + FLAGS_sine_d;
   }
 
+  // random和seq的write
   void DoWrite(ThreadState* thread, WriteMode write_mode) {
-    const int test_duration = write_mode == RANDOM ? FLAGS_duration : 0;
-    const int64_t num_ops = writes_ == 0 ? num_ : writes_;
+    const int test_duration = write_mode == RANDOM ? FLAGS_duration : 0;    // 根据写入模式确定测试持续时间：如果是随机写(RANDOM)，则使用 FLAGS_duration，否则为0 (FLAGS_duration 默认是0)
+    const int64_t num_ops = writes_ == 0 ? num_ : writes_;  // 确定操作总数：如果成员变量 writes_ 为0，则使用成员变量 num_，否则使用 writes_
 
-    size_t num_key_gens = 1;
-    if (db_.db == nullptr) {
+    size_t num_key_gens = 1;    // 初始化键生成器的数量为1
+    if (db_.db == nullptr) {    // db_.db 为空指针，表示未使用单一主DB，当前 Benchmark 实例操作的是多个数据库
       num_key_gens = multi_dbs_.size();
     }
     std::vector<std::unique_ptr<KeyGenerator>> key_gens(num_key_gens);
     int64_t max_ops = num_ops * num_key_gens;
-    int64_t ops_per_stage = max_ops;
-    if (FLAGS_num_column_families > 1 && FLAGS_num_hot_column_families > 0) {
-      ops_per_stage = (max_ops - 1) / (FLAGS_num_column_families /
+    int64_t ops_per_stage = max_ops;    // 初始化每个阶段的操作数为最大操作总数
+    if (FLAGS_num_column_families > 1 && FLAGS_num_hot_column_families > 0) {   // 如果配置了多个列族且有热列族
+      ops_per_stage = (max_ops - 1) / (FLAGS_num_column_families /  // 计算每个阶段的操作数，用于在不同列族间轮换
                                        FLAGS_num_hot_column_families) +
                       1;
     }
-
-    Duration duration(test_duration, max_ops, ops_per_stage);
-    const uint64_t num_per_key_gen = num_ + max_num_range_tombstones_;
+    // Duration类，在这个文件中定义的
+    Duration duration(test_duration, max_ops, ops_per_stage);   // 创建 Duration 对象，用于管理测试的持续时间或操作计数
+    const uint64_t num_per_key_gen = num_ + max_num_range_tombstones_;  // 计算每个键生成器需要生成的键的总数，包括普通键和范围删除墓碑
     for (size_t i = 0; i < num_key_gens; i++) {
+      // 为第 i 个键生成器分配内存并初始化
+      // 传入线程的随机数生成器、写入模式、每个生成器的键数量和每个阶段的操作数
       key_gens[i].reset(new KeyGenerator(&(thread->rand), write_mode,
                                          num_per_key_gen, ops_per_stage));
     }
 
-    if (num_ != FLAGS_num) {
+    if (num_ != FLAGS_num) {    // 如果成员变量 num_ (可能是经过调整的) 与命令行标志 FLAGS_num 不一致
       char msg[100];
       snprintf(msg, sizeof(msg), "(%" PRIu64 " ops)", num_);
-      thread->stats.AddMessage(msg);
+      thread->stats.AddMessage(msg);    // 将此消息添加到线程的统计信息中
     }
 
-    RandomGenerator gen;
+    RandomGenerator gen;    // 创建一个通用的随机值生成器对象
+    // include/rocksdb/write_batch.h
     WriteBatch batch(/*reserved_bytes=*/0, /*max_bytes=*/0,
                      FLAGS_write_batch_protection_bytes_per_key,
                      user_timestamp_size_);
     Status s;
     int64_t bytes = 0;
 
-    std::unique_ptr<const char[]> key_guard;
-    Slice key = AllocateKey(&key_guard);
+    std::unique_ptr<const char[]> key_guard;    // 为键分配内存的智能指针守护对象
+    Slice key = AllocateKey(&key_guard);    // 调用 AllocateKey 分配一个键的内存，并用 key_guard 管理其生命周期
     std::unique_ptr<const char[]> begin_key_guard;
     Slice begin_key = AllocateKey(&begin_key_guard);
     std::unique_ptr<const char[]> end_key_guard;
     Slice end_key = AllocateKey(&end_key_guard);
-    double p = 0.0;
-    uint64_t num_overwrites = 0, num_unique_keys = 0, num_selective_deletes = 0;
+    double p = 0.0; // 初始化覆盖概率为0.0
+    uint64_t num_overwrites = 0, num_unique_keys = 0, num_selective_deletes = 0;    // 初始化覆盖写入次数、唯一键数量、选择性删除次数为0
     // If user set overwrite_probability flag,
     // check if value is in [0.0,1.0].
-    if (FLAGS_overwrite_probability > 0.0) {
-      p = FLAGS_overwrite_probability > 1.0 ? 1.0 : FLAGS_overwrite_probability;
+    if (FLAGS_overwrite_probability > 0.0) {    // 如果命令行设置的覆盖概率大于0
+      p = FLAGS_overwrite_probability > 1.0 ? 1.0 : FLAGS_overwrite_probability;    // 将覆盖概率 p 限制在 [0.0, 1.0] 之间
       // If overwrite set by user, and UNIQUE_RANDOM mode on,
       // the overwrite_window_size must be > 0.
-      if (write_mode == UNIQUE_RANDOM && FLAGS_overwrite_window_size == 0) {
+      if (write_mode == UNIQUE_RANDOM && FLAGS_overwrite_window_size == 0) {    // 如果是唯一随机写模式且覆盖窗口大小为0
         fprintf(stderr,
                 "Overwrite_window_size must be  strictly greater than 0.\n");
         ErrorExit();
       }
     }
 
-    // Default_random_engine provides slightly
-    // improved throughput over mt19937.
+    // default_random_engine 提供比 mt19937 略微改进的吞吐量
     std::default_random_engine overwrite_gen{
-        static_cast<unsigned int>(*seed_base)};
-    std::bernoulli_distribution overwrite_decider(p);
+        static_cast<unsigned int>(*seed_base)}; // 用于生成覆盖决策的随机数引擎，使用 seed_base 初始化
+    std::bernoulli_distribution overwrite_decider(p);   // 伯努利分布，用于根据概率 p 决定是否执行覆盖操作
 
-    // Inserted key window is filled with the last N
-    // keys previously inserted into the DB (with
-    // N=FLAGS_overwrite_window_size).
-    // We use a deque struct because:
-    // - random access is O(1)
-    // - insertion/removal at beginning/end is also O(1).
+    // Inserted key window (已插入键窗口) 存储了最近插入到数据库中的 N 个键
+    // (N 等于 FLAGS_overwrite_window_size)。
+    // 我们使用 deque (双端队列) 结构是因为：
+    // - 随机访问的时间复杂度是 O(1)
+    // - 在开头/末尾插入/删除的时间复杂度也是 O(1)。
     std::deque<int64_t> inserted_key_window;
-    Random64 reservoir_id_gen(*seed_base);
+    Random64 reservoir_id_gen(*seed_base);  // 用于水塘抽样的随机数生成器，使用 seed_base 初始化
 
-    // --- Variables used in disposable/persistent keys simulation:
-    // The following variables are used when
-    // disposable_entries_batch_size is >0. We simualte a workload
-    // where the following sequence is repeated multiple times:
-    // "A set of keys S1 is inserted ('disposable entries'), then after
-    // some delay another set of keys S2 is inserted ('persistent entries')
-    // and the first set of keys S1 is deleted. S2 artificially represents
-    // the insertion of hypothetical results from some undefined computation
-    // done on the first set of keys S1. The next sequence can start as soon
-    // as the last disposable entry in the set S1 of this sequence is
-    // inserted, if the delay is non negligible"
-    bool skip_for_loop = false, is_disposable_entry = true;
-    std::vector<uint64_t> disposable_entries_index(num_key_gens, 0);
-    std::vector<uint64_t> persistent_ent_and_del_index(num_key_gens, 0);
+    // --- 用于可丢弃/持久化键模拟的变量：
+    // 当 disposable_entries_batch_size > 0 时，使用以下变量。我们模拟一个工作负载，
+    // 其中以下序列会重复多次：
+    // “插入一组键 S1 ('可丢弃条目')，然后在一些延迟之后插入另一组键 S2 ('持久化条目')，
+    // 并且删除第一组键 S1。S2 人为地代表了对第一组键 S1 进行某些未定义计算
+    // 所产生的假设结果。如果延迟不可忽略，则此序列中的最后一个可丢弃条目
+    // 插入后，下一个序列就可以开始。”
+    bool skip_for_loop = false, is_disposable_entry = true; // skip_for_loop: 是否跳过当前循环； is_disposable_entry: 当前条目是否为可丢弃条目
+    std::vector<uint64_t> disposable_entries_index(num_key_gens, 0); // 每个键生成器对应的可丢弃条目的索引
+    std::vector<uint64_t> persistent_ent_and_del_index(num_key_gens, 0); // 每个键生成器对应的持久化条目和删除操作的索引
     const uint64_t kNumDispAndPersEntries =
-        FLAGS_disposable_entries_batch_size +
-        FLAGS_persistent_entries_batch_size;
+        FLAGS_disposable_entries_batch_size + // 可丢弃条目的批次大小
+        FLAGS_persistent_entries_batch_size; // 持久化条目的批次大小
     if (kNumDispAndPersEntries > 0) {
       if ((write_mode != UNIQUE_RANDOM) || (writes_per_range_tombstone_ > 0) ||
           (p > 0.0)) {
@@ -5243,17 +5257,17 @@ class Benchmark {
         ErrorExit();
       }
     }
-    Random rnd_disposable_entry(static_cast<uint32_t>(*seed_base));
+    Random rnd_disposable_entry(static_cast<uint32_t>(*seed_base)); // 用于生成可丢弃条目随机值的随机数生成器
     std::string random_value;
-    // Queue that stores scheduled timestamp of disposable entries deletes,
-    // along with starting index of disposable entry keys to delete.
+    // 存储计划删除可丢弃条目的时间戳以及要删除的可丢弃条目键的起始索引的队列。
+    // 每个键生成器对应一个队列。
     std::vector<std::queue<std::pair<uint64_t, uint64_t>>> disposable_entries_q(
         num_key_gens);
-    // --- End of variables used in disposable/persistent keys simulation.
+    // --- 可丢弃/持久化键模拟变量结束。
 
     std::vector<std::unique_ptr<const char[]>> expanded_key_guards;
     std::vector<Slice> expanded_keys;
-    if (FLAGS_expand_range_tombstones) {
+    if (FLAGS_expand_range_tombstones) {    // 如果启用了扩展范围删除墓碑标志
       expanded_key_guards.resize(range_tombstone_width_);
       for (auto& expanded_key_guard : expanded_key_guards) {
         expanded_keys.emplace_back(AllocateKey(&expanded_key_guard));
@@ -5261,53 +5275,60 @@ class Benchmark {
     }
 
     std::unique_ptr<char[]> ts_guard;
-    if (user_timestamp_size_ > 0) {
+    if (user_timestamp_size_ > 0) { // 如果用户定义的时间戳大小大于0
       ts_guard.reset(new char[user_timestamp_size_]);
     }
 
-    int64_t stage = 0;
-    int64_t num_written = 0;
-    int64_t next_seq_db_at = num_ops;
-    size_t id = 0;
-    int64_t num_range_deletions = 0;
+    int64_t stage = 0;  // 当前阶段
+    int64_t num_written = 0;    // 已写入的条目数量
+    int64_t next_seq_db_at = num_ops;   // 下一个顺序数据库操作的目标写入数，用于多数据库顺序写入时的切换
+    size_t id = 0;  // 当前操作的数据库或键生成器的 ID
+    int64_t num_range_deletions = 0;    // 执行的范围删除操作的数量
 
+    // 循环条件：(每个键生成器还有键要生成) 并且 (测试持续时间未结束 或 操作数未完成，以 entries_per_batch_ 为单位检查)
     while ((num_per_key_gen != 0) && !duration.Done(entries_per_batch_)) {
-      if (duration.GetStage() != stage) {
-        stage = duration.GetStage();
+      if (duration.GetStage() != stage) {   // 如果 Duration 对象指示进入了新的阶段
+        stage = duration.GetStage();    // 更新当前所处的阶段
         if (db_.db != nullptr) {
-          db_.CreateNewCf(open_options_, stage);
+          db_.CreateNewCf(open_options_, stage);    // 为主数据库创建新的列族 (如果该阶段需要)
         } else {
-          for (auto& db : multi_dbs_) {
+          for (auto& db : multi_dbs_) { // 为所有数据库创建新的列族
             db.CreateNewCf(open_options_, stage);
           }
         }
       }
 
+      // 决定当前批次操作使用哪个数据库/键生成器 id
       if (write_mode != SEQUENTIAL) {
-        id = thread->rand.Next() % num_key_gens;
+        // 对于非顺序写入，随机选择一个键生成器/数据库。
+        id = thread->rand.Next() % num_key_gens;    // 通过线程的随机数生成器取模得到 id
       } else {
-        // When doing a sequential load with multiple databases, load them in
-        // order rather than all at the same time to avoid:
-        // 1) long delays between flushing memtables
-        // 2) flushing memtables for all of them at the same point in time
-        // 3) not putting the same number of keys in each database
-        if (num_written >= next_seq_db_at) {
-          next_seq_db_at += num_ops;
+        // 对于顺序写入，尤其是在有多个数据库的情况下，
+        // 按顺序加载它们，而不是同时加载所有数据库，以避免：
+        // 1) memtable flush 之间的长时间延迟
+        // 2) 所有数据库在同一时间点 flush memtable
+        // 3) 未能在每个数据库中放入相同数量的键
+        if (num_written >= next_seq_db_at) {    // 如果已写入的数量达到了当前数据库的目标写入数
+          // 切换到下一个数据库。
+          next_seq_db_at += num_ops;    // num_ops 在这里是每个数据库在此轮应处理的操作数。更新下一个切换点。
           id++;
+          // 安全检查，确保不会尝试访问不存在的数据库。
           if (id >= num_key_gens) {
             fprintf(stderr, "Logic error. Filled all databases\n");
             ErrorExit();
           }
         }
       }
+      // 根据确定的 id 选择目标数据库实例 (DBWithColumnFamilies)。
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(id);
 
-      batch.Clear();
-      int64_t batch_bytes = 0;
-
+      batch.Clear();    // 为新的一批操作清空 WriteBatch。
+      int64_t batch_bytes = 0;  // 初始化当前批次的字节计数器。
+      // 内层循环，处理一个批次内的条目数，entries_per_batch_默认值是1
       for (int64_t j = 0; j < entries_per_batch_; j++) {
-        int64_t rand_num = 0;
-        if ((write_mode == UNIQUE_RANDOM) && (p > 0.0)) {
+        int64_t rand_num = 0;   // 序列号，要经过GenerateKeyFromInt() 格式化，再赋值给Slice key
+        // --- 处理覆盖写逻辑 (overwrite) ---
+        if ((write_mode == UNIQUE_RANDOM) && (p > 0.0)) {   // p的默认值是0.0
           if ((inserted_key_window.size() > 0) &&
               overwrite_decider(overwrite_gen)) {
             num_overwrites++;
@@ -5323,7 +5344,7 @@ class Benchmark {
               inserted_key_window.push_back(rand_num);
             }
           }
-        } else if (kNumDispAndPersEntries > 0) {
+        } else if (kNumDispAndPersEntries > 0) {    // --- 处理可丢弃/持久化条目逻辑 ---
           // Check if queue is non-empty and if we need to insert
           // 'persistent' KV entries (KV entries that are never deleted)
           // and delete disposable entries previously inserted.
@@ -5406,19 +5427,19 @@ class Benchmark {
           }
         } else {
           rand_num = key_gens[id]->Next();
-        }
-        GenerateKeyFromInt(rand_num, FLAGS_num, &key);
+        }   // if - else if - else
+        GenerateKeyFromInt(rand_num, FLAGS_num, &key);  // 得到key
         Slice val;
-        if (kNumDispAndPersEntries > 0) {
+        if (kNumDispAndPersEntries > 0) {   // --- 处理可丢弃/持久化条目的值生成 ---
           random_value = rnd_disposable_entry.RandomString(
               is_disposable_entry ? FLAGS_disposable_entries_value_size
                                   : FLAGS_persistent_entries_value_size);
           val = Slice(random_value);
           num_unique_keys++;
-        } else {
-          val = gen.Generate();
+        } else {    // 正常写入流程
+          val = gen.Generate(); // 使用通用的随机值生成器 gen 生成一个值
         }
-        if (use_blob_db_) {
+        if (use_blob_db_) { // 如果当前使用的是 BlobDB
           // Stacked BlobDB
           blob_db::BlobDB* blobdb =
               static_cast<blob_db::BlobDB*>(db_with_cfh->db);
@@ -5428,21 +5449,20 @@ class Benchmark {
           } else {
             s = blobdb->Put(write_options_, key, val);
           }
-        } else if (FLAGS_num_column_families <= 1) {
+        } else if (FLAGS_num_column_families <= 1) {    // 如果不是 BlobDB，并且列族数量小于等于1 (即默认列族或无列族)
           batch.Put(key, val);
-        } else {
-          // We use same rand_num as seed for key and column family so that we
-          // can deterministically find the cfh corresponding to a particular
-          // key while reading the key.
+        } else {    // 如果不是 BlobDB，并且有多个列族
+          // 我们使用相同的 rand_num 作为键和列族的种子，
+          // 这样在读取键时可以确定性地找到与特定键对应的列族句柄
           batch.Put(db_with_cfh->GetCfh(rand_num), key, val);
         }
-        batch_bytes += val.size() + key_size_ + user_timestamp_size_;
-        bytes += val.size() + key_size_ + user_timestamp_size_;
-        ++num_written;
+        batch_bytes += val.size() + key_size_ + user_timestamp_size_;   // 更新当前批次的字节数，累加值大小、键大小和用户时间戳大小
+        bytes += val.size() + key_size_ + user_timestamp_size_; // 更新总写入字节数
+        ++num_written;  // 已写入的条目总数加1
 
-        // If all disposable entries have been inserted, then we need to
-        // add in the job queue a call for 'persistent entry insertions +
-        // disposable entry deletions'.
+        // --- 处理可丢弃/持久化条目模拟中的任务入队 ---
+        // 如果所有可丢弃条目都已插入，那么我们需要在作业队列中
+        // 添加一个“持久化条目插入 + 可丢弃条目删除”的调用。
         if (kNumDispAndPersEntries > 0 && is_disposable_entry &&
             ((disposable_entries_index[id] % kNumDispAndPersEntries) == 0)) {
           // Queue contains [timestamp, starting_idx],
@@ -5456,6 +5476,7 @@ class Benchmark {
               disposable_entries_index[id] - kNumDispAndPersEntries
               /*starting idx*/));
         }
+        // --- 处理范围删除 (Range Tombstone) 逻辑 ---
         if (writes_per_range_tombstone_ > 0 &&
             num_written > writes_before_delete_range_ &&
             (num_written - writes_before_delete_range_) /
@@ -5499,32 +5520,32 @@ class Benchmark {
             }
           }
         }
-      }
-      if (thread->shared->write_rate_limiter.get() != nullptr) {
+      } // for
+      if (thread->shared->write_rate_limiter.get() != nullptr) {    // 检查是否有写入速率限制器
         thread->shared->write_rate_limiter->Request(
             batch_bytes, Env::IO_HIGH, nullptr /* stats */,
-            RateLimiter::OpType::kWrite);
-        // Set time at which last op finished to Now() to hide latency and
-        // sleep from rate limiter. Also, do the check once per batch, not
-        // once per write.
-        thread->stats.ResetLastOpTime();
+            RateLimiter::OpType::kWrite);   // 就向速率限制器请求允许写入 batch_bytes 这么多的数据
+        thread->stats.ResetLastOpTime();    // 重置操作的最后完成时间
       }
+      // 如果用户自定义时间戳长度 > 0，就为当前批量写入分配一个新的时间戳
       if (user_timestamp_size_ > 0) {
-        Slice user_ts = mock_app_clock_->Allocate(ts_guard.get());
+        Slice user_ts = mock_app_clock_->Allocate(ts_guard.get());  // 分配指定长度的用户时间戳，存入 ts_guard
         s = batch.UpdateTimestamps(
-            user_ts, [this](uint32_t) { return user_timestamp_size_; });
+            user_ts, [this](uint32_t) { return user_timestamp_size_; });    // 把时间戳写进整个 WriteBatch；回调返回每条记录时间戳长度
         if (!s.ok()) {
           fprintf(stderr, "assign timestamp to write batch: %s\n",
                   s.ToString().c_str());
           ErrorExit();
         }
       }
-      if (!use_blob_db_) {
+      if (!use_blob_db_) {  // 如果不是堆叠式 BlobDB，直接写入 RocksDB；否则堆叠 BlobDB 会在别处处理
         // Not stacked BlobDB
         s = db_with_cfh->db->Write(write_options_, &batch);
       }
+      // 记录批量写入已完成（统计 entries_per_batch_ 条，类型 kWrite）
       thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db,
                                 entries_per_batch_, kWrite);
+      // 如果启用了 “正弦波写速率” 控制逻辑
       if (FLAGS_sine_write_rate) {
         uint64_t now = FLAGS_env->NowMicros();
 
@@ -5546,15 +5567,15 @@ class Benchmark {
               NewGenericRateLimiter(write_rate));
         }
       }
-      if (!s.ok()) {
+      if (!s.ok()) {    // 若写入返回非 OK，尝试等待后台错误恢复（600 秒），若未恢复则保留原错误
         s = listener_->WaitForRecovery(600000000) ? Status::OK() : s;
       }
 
-      if (!s.ok()) {
+      if (!s.ok()) {    // 若仍然失败，打印错误并退出
         fprintf(stderr, "put error: %s\n", s.ToString().c_str());
         ErrorExit();
       }
-    }
+    }   // while
     if ((write_mode == UNIQUE_RANDOM) && (p > 0.0)) {
       fprintf(stdout,
               "Number of unique keys inserted: %" PRIu64
@@ -5571,7 +5592,7 @@ class Benchmark {
                 << std::endl;
     }
     thread->stats.AddBytes(bytes);
-  }
+  } // DoWrite
 
   Status DoDeterministicCompact(ThreadState* thread,
                                 CompactionStyle compaction_style,
@@ -6078,6 +6099,7 @@ class Benchmark {
   int64_t GetRandomKey(Random64* rand) {
     uint64_t rand_int = rand->Next();
     int64_t key_rand;
+    // 随机数落在 [0, FLAGS_num)
     if (read_random_exp_range_ == 0) {
       key_rand = rand_int % FLAGS_num;
     } else {
@@ -8657,19 +8679,23 @@ class Benchmark {
   }
 };
 
+// db_bench_tool是RocksDB基准测试工具的主函数。
+// 它负责解析命令行参数，初始化环境和选项，
+// 创建Benchmark对象，并运行指定的基准测试。
+// db_bench_tool.h中，声明为int db_bench_tool(int argc, char** argv, ToolHooks& hooks = defaultHooks);
 int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
-  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
+  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();  // 安装堆栈跟踪处理器，用于调试
   ConfigOptions config_options;
   static bool initialized = false;
   if (!initialized) {
     SetUsageMessage(std::string("\nUSAGE:\n") + std::string(argv[0]) +
-                    " [OPTIONS]...");
-    SetVersionString(GetRocksVersionAsString(true));
+                    " [OPTIONS]..."); // gflags的函数，当运行./db_bench --help，会显示这句话
+    SetVersionString(GetRocksVersionAsString(true));  // ./db_bench --version
     initialized = true;
   }
-  ParseCommandLineFlags(&argc, &argv, true);
+  ParseCommandLineFlags(&argc, &argv, true);  // gflags的函数
   FLAGS_compaction_style_e =
-      (ROCKSDB_NAMESPACE::CompactionStyle)FLAGS_compaction_style;
+      (ROCKSDB_NAMESPACE::CompactionStyle)FLAGS_compaction_style; // --compaction_style
   if (FLAGS_statistics && !FLAGS_statistics_string.empty()) {
     fprintf(stderr,
             "Cannot provide both --statistics and --statistics_string.\n");
@@ -8677,7 +8703,7 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
   }
   if (!FLAGS_statistics_string.empty()) {
     Status s = Statistics::CreateFromString(config_options,
-                                            FLAGS_statistics_string, &dbstats);
+                                            FLAGS_statistics_string, &dbstats); // 从字符串创建统计对象，dbstats是一个全局变量
     if (dbstats == nullptr) {
       fprintf(stderr,
               "No Statistics registered matching string: %s status=%s\n",
@@ -8686,13 +8712,13 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
     }
   }
   if (FLAGS_statistics) {
-    dbstats = ROCKSDB_NAMESPACE::CreateDBStatistics();
+    dbstats = ROCKSDB_NAMESPACE::CreateDBStatistics();  // monitoring/statistics.cc
   }
   if (dbstats) {
     dbstats->set_stats_level(static_cast<StatsLevel>(FLAGS_stats_level));
   }
   FLAGS_compaction_pri_e =
-      (ROCKSDB_NAMESPACE::CompactionPri)FLAGS_compaction_pri;
+      (ROCKSDB_NAMESPACE::CompactionPri)FLAGS_compaction_pri; // option的默认的compaction_pri
 
   std::vector<std::string> fanout = ROCKSDB_NAMESPACE::StringSplit(
       FLAGS_max_bytes_for_level_multiplier_additional, ',');
@@ -8744,7 +8770,7 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
   }
 
   // Let -readonly imply -use_existing_db
-  FLAGS_use_existing_db |= FLAGS_readonly;
+  FLAGS_use_existing_db |= FLAGS_readonly;  // use_existing_db 默认为false，如果设置了 --readonly=true，那么强制也启用 --use_existing_db=true
 
   if (FLAGS_build_info) {
     std::string build_info;
@@ -8800,7 +8826,7 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
   if (FLAGS_stats_interval_seconds > 0) {
     // When both are set then FLAGS_stats_interval determines the frequency
     // at which the timer is checked for FLAGS_stats_interval_seconds
-    FLAGS_stats_interval = 1000;
+    FLAGS_stats_interval = 1000;  // 设置统计间隔为 1000 (操作数)
   }
 
   if (FLAGS_seek_missing_prefix && FLAGS_prefix_size <= 8) {
@@ -8808,10 +8834,10 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
     exit(1);
   }
 
-  ROCKSDB_NAMESPACE::Benchmark benchmark;
-  benchmark.Run(hooks);
+  ROCKSDB_NAMESPACE::Benchmark benchmark; // 创建 Benchmark 对象
+  benchmark.Run(hooks); // 运行基准测试
 
-  if (FLAGS_print_malloc_stats) {
+  if (FLAGS_print_malloc_stats) { // 如果设置了打印内存分配统计标志，默认false
     std::string stats_string;
     ROCKSDB_NAMESPACE::DumpMallocStats(&stats_string);
     fprintf(stdout, "Malloc stats:\n%s\n", stats_string.c_str());
@@ -8819,5 +8845,5 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
 
   return 0;
 }
-}  // namespace ROCKSDB_NAMESPACE
+}  // namespace ROCKSDB_NAMESPACE，1814行
 #endif
