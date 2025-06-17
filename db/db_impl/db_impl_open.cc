@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include <cinttypes>
+#include <iostream>
 
 #include "db/builder.h"
 #include "db/db_impl/db_impl.h"
@@ -302,7 +303,9 @@ Status DBImpl::ValidateOptions(const DBOptions& db_options) {
   }
   return Status::OK();
 }
-
+/*
+设置数据库ID；创建初始版本编辑；创建首个MANIFEST文件；更新CURRENT文件
+*/
 Status DBImpl::NewDB(std::vector<std::string>* new_filenames) {
   VersionEdit new_db_edit;
   const WriteOptions write_options(Env::IOActivity::kDBOpen);
@@ -424,10 +427,18 @@ Status DBImpl::Recover(
 
   const WriteOptions write_options(Env::IOActivity::kDBOpen);
   bool tmp_is_new_db = false;
-  bool& is_new_db = recovery_ctx ? recovery_ctx->is_new_db_ : tmp_is_new_db;
+  bool& is_new_db = recovery_ctx ? recovery_ctx->is_new_db_ : tmp_is_new_db;  // false
   assert(db_lock_ == nullptr);
   std::vector<std::string> files_in_dbname;
+  
+  /*
+  第一步：处理非只读模式下的目录和锁文件创建
+  - 创建必要的目录结构（DB目录、WAL目录、数据路径）
+  - 获取数据库锁文件防止多进程同时打开
+  - 启用错误自动恢复机制（仅单路径情况下）
+  */
   if (!read_only) {
+    // 设置目录结构：DB目录、WAL目录、数据路径
     Status s = directories_.SetDirectories(fs_.get(), dbname_,
                                            immutable_db_options_.wal_dir,
                                            immutable_db_options_.db_paths);
@@ -435,20 +446,25 @@ Status DBImpl::Recover(
       return s;
     }
 
+    // 获取数据库锁文件，防止多个进程同时打开同一个数据库
     s = env_->LockFile(LockFileName(dbname_), &db_lock_);
     if (!s.ok()) {
       return s;
     }
 
+    /*
+    第二步：检查数据库是否已存在并处理创建逻辑
+    - 检查CURRENT文件是否存在（正常模式）或寻找MANIFEST文件（best-efforts模式）
+    - 根据配置决定是创建新DB、报错或继续打开已存在的DB
+    */
     std::string current_fname = CurrentFileName(dbname_);
-    // Path to any MANIFEST file in the db dir. It does not matter which one.
-    // Since best-efforts recovery ignores CURRENT file, existence of a
-    // MANIFEST indicates the recovery to recover existing db. If no MANIFEST
-    // can be found, a new db will be created.
+    // MANIFEST文件路径，用于best-efforts恢复时判断DB是否存在
     std::string manifest_path;
-    if (!immutable_db_options_.best_efforts_recovery) {
-      s = env_->FileExists(current_fname);
-    } else {
+    if (!immutable_db_options_.best_efforts_recovery) { // 默认走这里
+      // 正常恢复模式：检查CURRENT文件
+      s = env_->FileExists(current_fname);  // 没找到
+      std::cout << "s.IsNotFound()" << s.IsNotFound() << std::endl;
+    } else {  // Best-efforts恢复模式：查找任何非空的MANIFEST文件
       s = Status::NotFound();
       IOOptions io_opts;
       io_opts.do_not_recurse = true;
@@ -458,24 +474,27 @@ Status DBImpl::Recover(
         s = io_s;
         files_in_dbname.clear();
       }
+      // 遍历DB目录寻找非空的MANIFEST文件
       for (const std::string& file : files_in_dbname) {
         uint64_t number = 0;
-        FileType type = kWalFile;  // initialize
+        FileType type = kWalFile;  // 初始化
         if (ParseFileName(file, &number, &type) && type == kDescriptorFile) {
           uint64_t bytes;
           s = env_->GetFileSize(DescriptorFileName(dbname_, number), &bytes);
           if (s.ok() && bytes != 0) {
-            // Found non-empty MANIFEST (descriptor log), thus best-efforts
-            // recovery does not have to treat the db as empty.
+            // 找到非空MANIFEST文件，best-efforts恢复不需要将DB视为空
             manifest_path = dbname_ + "/" + file;
             break;
           }
         }
       }
     }
+    
+    // 根据文件存在性和配置选项决定后续操作
     if (s.IsNotFound()) {
-      if (immutable_db_options_.create_if_missing) {
-        s = NewDB(&files_in_dbname);
+      if (immutable_db_options_.create_if_missing) {  // 进入这个if
+        // DB不存在且允许创建新DB
+        s = NewDB(&files_in_dbname);  // 创建新数据库，创建了CURRENT，IDENTITY，MANIFEST-000001
         is_new_db = true;
         if (!s.ok()) {
           return s;
@@ -486,26 +505,32 @@ Status DBImpl::Recover(
       }
     } else if (s.ok()) {
       if (immutable_db_options_.error_if_exists) {
+        // DB已存在但配置要求不能存在时报错
         return Status::InvalidArgument(dbname_,
                                        "exists (error_if_exists is true)");
       }
     } else {
-      // Unexpected error reading file
+      // 读取文件时发生意外错误
       assert(s.IsIOError());
       return s;
     }
-    // Verify compatibility of file_options_ and filesystem
+    
+    /*
+    第三步：验证文件系统选项兼容性
+    - 测试Direct I/O等文件系统特性是否支持
+    - 检查file_options_配置与实际文件系统的兼容性
+    */
     {
       std::unique_ptr<FSRandomAccessFile> idfile;
       FileOptions customized_fs(file_options_);
       customized_fs.use_direct_reads |=
           immutable_db_options_.use_direct_io_for_flush_and_compaction;
       const std::string& fname =
-          manifest_path.empty() ? current_fname : manifest_path;
+          manifest_path.empty() ? current_fname : manifest_path;  // current_fname为"./testdb2/CURRENT"，manifest_path为""
       s = fs_->NewRandomAccessFile(fname, customized_fs, &idfile, nullptr);
       if (!s.ok()) {
         std::string error_str = s.ToString();
-        // Check if unsupported Direct I/O is the root cause
+        // 检查是否是Direct I/O不支持导致的错误
         customized_fs.use_direct_reads = false;
         s = fs_->NewRandomAccessFile(fname, customized_fs, &idfile, nullptr);
         if (s.ok()) {
@@ -518,6 +543,10 @@ Status DBImpl::Recover(
       }
     }
   } else if (immutable_db_options_.best_efforts_recovery) {
+    /*
+    第四步：只读模式下的best-efforts恢复准备
+    - 获取DB目录中的所有文件列表供后续恢复使用
+    */
     assert(files_in_dbname.empty());
     IOOptions io_opts;
     io_opts.do_not_recurse = true;
@@ -531,27 +560,33 @@ Status DBImpl::Recover(
     }
     assert(s.ok());
   }
+  
+  /*
+  第五步：恢复版本信息和元数据
+  - 从MANIFEST文件恢复版本信息（正常模式）或尝试恢复（best-efforts模式）
+  - 设置重试机制用于处理损坏的MANIFEST文件
+  */
   assert(is_new_db || db_id_.empty());
   Status s;
   bool missing_table_file = false;
   if (!immutable_db_options_.best_efforts_recovery) {
-    // Status of reading the descriptor file
-    Status desc_status;
+    // 正常恢复模式：从MANIFEST文件恢复版本信息
+    Status desc_status;  // MANIFEST文件读取状态
     s = versions_->Recover(column_families, read_only, &db_id_,
                            /*no_error_if_files_missing=*/false, is_retry,
-                           &desc_status);
+                           &desc_status); // 来自version_set.cc
     desc_status.PermitUncheckedError();
+    
+    // 处理重试统计
     if (is_retry) {
       RecordTick(stats_, FILE_READ_CORRUPTION_RETRY_COUNT);
       if (desc_status.ok()) {
         RecordTick(stats_, FILE_READ_CORRUPTION_RETRY_SUCCESS_COUNT);
       }
     }
+    
+    // 设置重试机制：在MANIFEST损坏且文件系统支持校验重建时允许重试
     if (can_retry) {
-      // If we're opening for the first time and the failure is likely due to
-      // a corrupt MANIFEST file (could result in either the log::Reader
-      // detecting a corrupt record, or SST files not found error due to
-      // discarding badly formed tail records)
       if (!is_retry &&
           (desc_status.IsCorruption() || s.IsNotFound() || s.IsCorruption()) &&
           CheckFSFeatureSupport(fs_.get(),
@@ -567,11 +602,12 @@ Status DBImpl::Recover(
       }
     }
   } else {
+    // Best-efforts恢复模式：尝试从文件列表恢复
     assert(!files_in_dbname.empty());
     s = versions_->TryRecover(column_families, read_only, files_in_dbname,
                               &db_id_, &missing_table_file);
     if (s.ok()) {
-      // TryRecover may delete previous column_family_set_.
+      // TryRecover可能删除之前的column_family_set_，需要重新创建
       column_family_memtables_.reset(
           new ColumnFamilyMemTablesImpl(versions_->GetColumnFamilySet()));
     }
@@ -579,54 +615,41 @@ Status DBImpl::Recover(
   if (!s.ok()) {
     return s;
   }
+  
+  /*
+  第六步：非只读模式下的LSM树优化
+  - 对启用level_compaction_dynamic_level_bytes的CF进行文件下移
+  - 将文件从高层级移动到最底层以优化LSM结构
+  */
   if (s.ok() && !read_only) {
     for (auto cfd : *versions_->GetColumnFamilySet()) {
       const auto& moptions = cfd->GetLatestMutableCFOptions();
-      // Try to trivially move files down the LSM tree to start from bottommost
-      // level when level_compaction_dynamic_level_bytes is enabled. This should
-      // only be useful when user is migrating to turning on this option.
-      // If a user is migrating from Level Compaction with a smaller level
-      // multiplier or from Universal Compaction, there may be too many
-      // non-empty levels and the trivial moves here are not sufficed for
-      // migration. Additional compactions are needed to drain unnecessary
-      // levels.
-      //
-      // Note that this step moves files down LSM without consulting
-      // SSTPartitioner. Further compactions are still needed if
-      // the user wants to partition SST files.
-      // Note that files moved in this step may not respect the compression
-      // option in target level.
+      // 尝试将文件平凡地向下移动到LSM树的最底层
+      // 这在用户迁移到启用level_compaction_dynamic_level_bytes时很有用
       if (cfd->ioptions().compaction_style ==
               CompactionStyle::kCompactionStyleLevel &&
           cfd->ioptions().level_compaction_dynamic_level_bytes &&
           !moptions.disable_auto_compactions) {
-        int to_level = cfd->ioptions().num_levels - 1;
-        // last level is reserved
-        // allow_ingest_behind does not support Level Compaction,
-        // and per_key_placement can have infinite compaction loop for Level
-        // Compaction. Adjust to_level here just to be safe.
+        int to_level = cfd->ioptions().num_levels - 1;  // 6
+        // 最后一层是保留的，调整to_level以确保安全
         if (cfd->ioptions().allow_ingest_behind ||
             moptions.preclude_last_level_data_seconds > 0) {
           to_level -= 1;
         }
-        // Whether this column family has a level trivially moved
-        bool moved = false;
-        // Fill the LSM starting from to_level and going up one level at a time.
-        // Some loop invariants (when last level is not reserved):
-        // - levels in (from_level, to_level] are empty, and
-        // - levels in (to_level, last_level] are non-empty.
+        
+        bool moved = false;  // 该CF是否有文件被移动
+        // 从to_level开始向上填充LSM，一次一个级别
         for (int from_level = to_level; from_level >= 0; --from_level) {
           const std::vector<FileMetaData*>& level_files =
               cfd->current()->storage_info()->LevelFiles(from_level);
-          if (level_files.empty() || from_level == 0) {
+          if (level_files.empty() || from_level == 0) { // 排除L0
             continue;
           }
           assert(from_level <= to_level);
-          // Trivial move files from `from_level` to `to_level`
+          // 平凡移动文件从from_level到to_level
           if (from_level < to_level) {
             if (!moved) {
-              // lsm_state will look like "[1,2,3,4,5,6,0]" for an LSM with
-              // 7 levels
+              // 记录LSM状态用于日志
               std::string lsm_state = "[";
               for (int i = 0; i < cfd->ioptions().num_levels; ++i) {
                 lsm_state += std::to_string(
@@ -649,6 +672,8 @@ Status DBImpl::Recover(
                 "[%s] Moving %zu files from from_level-%d to from_level-%d",
                 cfd->GetName().c_str(), level_files.size(), from_level,
                 to_level);
+            
+            // 创建版本编辑来记录文件移动
             VersionEdit edit;
             edit.SetColumnFamily(cfd->GetID());
             for (const FileMetaData* f : level_files) {
@@ -657,8 +682,7 @@ Status DBImpl::Recover(
                            f->fd.GetFileSize(), f->smallest, f->largest,
                            f->fd.smallest_seqno, f->fd.largest_seqno,
                            f->marked_for_compaction,
-                           f->temperature,  // this can be different from
-                           // `last_level_temperature`
+                           f->temperature,
                            f->oldest_blob_file_number, f->oldest_ancester_time,
                            f->file_creation_time, f->epoch_number,
                            f->file_checksum, f->file_checksum_func_name,
@@ -675,30 +699,46 @@ Status DBImpl::Recover(
           }
           --to_level;
         }
-      }
-    }
+      } // if
+    } // for
   }
+  
+  /*
+  第七步：设置数据库ID
+  - 新数据库：在NewDB中已设置
+  - 现有数据库：根据配置写入MANIFEST或单独设置
+  */
   if (is_new_db) {
-    // Already set up DB ID in NewDB
+    // 新数据库的ID已在NewDB中设置
   } else if (immutable_db_options_.write_dbid_to_manifest && recovery_ctx) {
+    // 将DB ID写入MANIFEST
     VersionEdit edit;
     s = SetupDBId(write_options, read_only, is_new_db, is_retry, &edit);
     recovery_ctx->UpdateVersionEdits(
         versions_->GetColumnFamilySet()->GetDefault(), edit);
   } else {
+    // 不写入MANIFEST，仅设置DB ID
     s = SetupDBId(write_options, read_only, is_new_db, is_retry, nullptr);
   }
   assert(!s.ok() || !db_id_.empty());
   ROCKS_LOG_INFO(immutable_db_options_.info_log, "DB ID: %s\n", db_id_.c_str());
+  
+  /*
+  第八步：后续恢复处理
+  - 更新下一个文件编号
+  - 执行一致性检查（如果启用paranoid_checks）
+  - 为CF添加目录
+  */
   if (s.ok() && !read_only) {
     s = MaybeUpdateNextFileNumber(recovery_ctx);
   }
 
   if (immutable_db_options_.paranoid_checks && s.ok()) {
-    s = CheckConsistency();
+    s = CheckConsistency();  // 执行一致性检查
   }
+  
   if (s.ok() && !read_only) {
-    // TODO: share file descriptors (FSDirectory) with SetDirectories above
+    // 为每个CF添加必要的目录
     std::map<std::string, std::shared_ptr<FSDirectory>> created_dirs;
     for (auto cfd : *versions_->GetColumnFamilySet()) {
       s = cfd->AddDirectories(&created_dirs);
@@ -708,10 +748,16 @@ Status DBImpl::Recover(
     }
   }
 
+  /*
+  第九步：WAL恢复处理
+  - 计算内存中状态的最大值
+  - 创建默认CF句柄
+  - 收集和验证WAL文件
+  - 按顺序恢复WAL文件
+  */
   std::vector<std::string> files_in_wal_dir;
   if (s.ok()) {
-    // Initial max_total_in_memory_state_ before recovery wals. Log recovery
-    // may check this value to decide whether to flush.
+    // 计算恢复WAL前的初始max_total_in_memory_state_
     max_total_in_memory_state_ = 0;
     for (auto cfd : *versions_->GetColumnFamilySet()) {
       const auto& mutable_cf_options = cfd->GetLatestMutableCFOptions();
@@ -724,13 +770,7 @@ Status DBImpl::Recover(
         versions_->GetColumnFamilySet()->GetDefault(), this, &mutex_);
     default_cf_internal_stats_ = default_cf_handle_->cfd()->internal_stats();
 
-    // Recover from all newer log files than the ones named in the
-    // descriptor (new log files may have been added by the previous
-    // incarnation without registering them in the descriptor).
-    //
-    // Note that prev_log_number() is no longer used, but we pay
-    // attention to it in case we are recovering a database
-    // produced by an older version of rocksdb.
+    // 从比描述符中记录的更新的日志文件中恢复
     auto wal_dir = immutable_db_options_.GetWalDir();
     if (!immutable_db_options_.best_efforts_recovery) {
       IOOptions io_opts;
@@ -744,6 +784,7 @@ Status DBImpl::Recover(
       return s;
     }
 
+    // 收集所有WAL文件
     std::unordered_map<uint64_t, std::string> wal_files;
     for (const auto& file : files_in_wal_dir) {
       uint64_t number;
@@ -760,6 +801,7 @@ Status DBImpl::Recover(
       }
     }
 
+    // WAL跟踪和验证
     if (immutable_db_options_.track_and_verify_wals && !is_new_db &&
         !immutable_db_options_.best_efforts_recovery && wal_files.empty()) {
       return Status::Corruption("Opening an existing DB with no WAL files");
@@ -767,15 +809,11 @@ Status DBImpl::Recover(
 
     if (immutable_db_options_.track_and_verify_wals_in_manifest) {
       if (!immutable_db_options_.best_efforts_recovery) {
-        // Verify WALs in MANIFEST.
+        // 验证MANIFEST中的WAL
         s = versions_->GetWalSet().CheckWals(env_, wal_files);
-      }  // else since best effort recovery does not recover from WALs, no need
-         // to check WALs.
+      }
     } else if (!versions_->GetWalSet().GetWals().empty()) {
-      // Tracking is disabled, clear previously tracked WALs from MANIFEST,
-      // otherwise, in the future, if WAL tracking is enabled again,
-      // since the WALs deleted when WAL tracking is disabled are not persisted
-      // into MANIFEST, WAL check may fail.
+      // 清除之前跟踪的WAL信息
       VersionEdit edit;
       WalNumber max_wal_number =
           versions_->GetWalSet().GetWals().rbegin()->first;
@@ -789,12 +827,20 @@ Status DBImpl::Recover(
       return s;
     }
 
+    /*
+    第十步：执行WAL文件恢复
+    - 计算内存中状态的最大值
+    - 创建默认CF句柄
+    - 收集和验证WAL文件
+    - 按顺序恢复WAL文件
+    */
     if (!wal_files.empty()) {
       if (error_if_wal_file_exists) {
         return Status::Corruption(
             "The db was opened in readonly mode with error_if_wal_file_exists"
             "flag but a WAL file already exists");
       } else if (error_if_data_exists_in_wals) {
+        // 检查WAL文件是否包含数据
         for (auto& wal_file : wal_files) {
           uint64_t bytes;
           s = env_->GetFileSize(wal_file.second, &bytes);
@@ -810,7 +856,7 @@ Status DBImpl::Recover(
     }
 
     if (!wal_files.empty()) {
-      // Recover in the order in which the wals were generated
+      // 按WAL生成顺序恢复
       std::vector<uint64_t> wals;
       wals.reserve(wal_files.size());
       for (const auto& wal_file : wal_files) {
@@ -825,7 +871,7 @@ Status DBImpl::Recover(
         *recovered_seq = next_sequence;
       }
       if (!s.ok()) {
-        // Clear memtables if recovery failed
+        // 恢复失败时清理memtable
         for (auto cfd : *versions_->GetColumnFamilySet()) {
           cfd->CreateNewMemtable(kMaxSequenceNumber);
         }
@@ -833,11 +879,12 @@ Status DBImpl::Recover(
     }
   }
 
+  /*
+  第十一步：只读模式下的选项文件处理
+  - 更新options_file_number_以反映最新的OPTIONS文件
+  - 设置options_file_size_
+  */
   if (read_only) {
-    // If we are opening as read-only, we need to update options_file_number_
-    // to reflect the most recent OPTIONS file. It does not matter for regular
-    // read-write db instance because options_file_number_ will later be
-    // updated to versions_->NewFileNumber() in RenameTempFileToOptionsFile.
     std::vector<std::string> filenames;
     if (s.ok()) {
       const std::string normalized_dbname = NormalizePath(dbname_);
@@ -858,6 +905,7 @@ Status DBImpl::Recover(
       uint64_t number = 0;
       uint64_t options_file_number = 0;
       FileType type;
+      // 找到最新的OPTIONS文件
       for (const auto& fname : filenames) {
         if (ParseFileName(fname, &number, &type) && type == kOptionsFile) {
           options_file_number = std::max(number, options_file_number);
@@ -943,7 +991,7 @@ Status DBImpl::PersistentStatsProcessFormatVersion() {
     }
     if (s.ok()) {
       s = batch.Put(persist_stats_cf_handle_, kCompatibleVersionKeyString,
-                    std::to_string(kStatsCFCompatibleFormatVersion));
+                    std::to_string( kStatsCFCompatibleFormatVersion));
     }
     if (s.ok()) {
       // TODO: plumb Env::IOActivity, Env::IOPriority
@@ -1620,9 +1668,8 @@ Status DBImpl::MaybeWriteLevel0TableForRecovery(
       VersionEdit* edit = &iter->second;
       status = WriteLevel0TableForRecovery(job_id, cfd, cfd->mem(), edit);
       if (!status.ok()) {
-        // Reflect errors immediately so that conditions like full
-        // file-systems cause the DB::Open() to fail.
-        return status;
+        // Recovery failed
+        break;
       }
       *flushed = true;
 
@@ -2199,16 +2246,17 @@ Status DBImpl::WriteLevel0TableForRecovery(int job_id, ColumnFamilyData* cfd,
   return s;
 }
 
+// 如果走这个Open，就是没有指定 column family 的情况，就会走默认的default column family
 Status DB::Open(const Options& options, const std::string& dbname,
                 std::unique_ptr<DB>* dbptr) {
   DBOptions db_options(options);
   ColumnFamilyOptions cf_options(options);
   std::vector<ColumnFamilyDescriptor> column_families;
-  column_families.emplace_back(kDefaultColumnFamilyName, cf_options);   // default
-  if (db_options.persist_stats_to_disk) {
+  column_families.emplace_back(kDefaultColumnFamilyName, cf_options);   // 只添加了一个default column family
+  if (db_options.persist_stats_to_disk) { // 默认false
     column_families.emplace_back(kPersistentStatsColumnFamilyName, cf_options);
   }
-  std::vector<ColumnFamilyHandle*> handles;
+  std::vector<ColumnFamilyHandle*> handles; // 这是一个合法的值类型实例，&handles不为nullptr
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
   if (s.ok()) {
     if (db_options.persist_stats_to_disk) {
@@ -2400,7 +2448,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   }
 
   *dbptr = nullptr;
-  assert(handles);
+  assert(handles);  // handles不为nullptr才继续执行，否则程序中止
   handles->clear(); // 清空用户传入的 ColumnFamilyHandle 列表
 
   size_t max_write_buffer_size = 0;
@@ -2412,8 +2460,9 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   }
 
   auto impl = std::make_unique<DBImpl>(db_options, dbname, seq_per_batch,
-                                       batch_per_txn);  // 创建 DBImpl 实例，传入 seq_per_batch、batch_per_txn 控制恢复策略
-  if (!impl->immutable_db_options_.info_log) {  // 如果日志未创建成功，则使用预记录的错误状态返回
+                                       batch_per_txn);  // 创建 DBImpl 实例，创建了LOG
+  // TODO，不管怎么调试，都不走这个if-else，啥情况
+  if (!impl->immutable_db_options_.info_log) {  // info_log是Logger对象，写入LOG文件
     s = impl->init_logger_creation_s_;
     return s;
   } else {
@@ -2446,7 +2495,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     }
   }
   if (s.ok()) {
-    s = impl->CreateArchivalDirectory();    // 创建归档目录（用于 WAL 回收）
+    s = impl->CreateArchivalDirectory();    // 创建归档目录（用于 WAL 回收），应该也是dbname
   }
   if (!s.ok()) {
     return s;
@@ -2461,16 +2510,17 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   impl->mutex_.Lock();
 
   // Handles create_if_missing, error_if_exists
-  uint64_t recovered_seq(kMaxSequenceNumber);
+  uint64_t recovered_seq(kMaxSequenceNumber); // 72057594037927935，2的56次方减1，而不是64bit
+  // TODO，无法自动跳转到函数里面，但是可以手动
   s = impl->Recover(column_families, false /* read_only */,
                     false /* error_if_wal_file_exists */,
                     false /* error_if_data_exists_in_wals */, is_retry,
-                    &recovered_seq, &recovery_ctx, can_retry);
+                    &recovered_seq, &recovery_ctx, can_retry);  // 创建了 CURRENT，MANIFEST-000001，LOCK，IDENTITY
   if (s.ok()) {
     uint64_t new_log_number = impl->versions_->NewFileNumber();
     log::Writer* new_log = nullptr;
     const size_t preallocate_block_size =
-        impl->GetWalPreallocateBlockSize(max_write_buffer_size);
+        impl->GetWalPreallocateBlockSize(max_write_buffer_size);  // 创建了000004.log
     // TODO(hx235): Pass in the correct `predecessor_wal_info` for the first WAL
     // created during DB open with predecessor WALs from previous DB session due
     // to `avoid_flush_during_recovery == true`. This can protect the last WAL

@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "Database opened successfully: " << db_path << std::endl;
 
-    rocksdb::Iterator *it = db-> NewIterator(read_options); // 创建一个新的迭代器用于范围读取
+    rocksdb::Iterator *it = db->NewIterator(read_options); // 创建一个新的迭代器用于范围读取
 
     std::ifstream workload_file(workload_file_path);
     if (!workload_file.is_open()) {
