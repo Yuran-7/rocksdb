@@ -51,7 +51,7 @@ int main(int argc, char* argv[]) {
     options.write_buffer_size = 16 * 1024 * 1024; // 设置memtable大小为16MB
     options.target_file_size_base = 16 * 1024 * 1024; // 设置SST文件大小为16MB
 
-    rocksdb::Status status = rocksdb::DB::Open(options, db_path, &db);
+    rocksdb::Status status = rocksdb::DB::Open(options, db_path, &db);  // 要获取db，通过std::move(db_impl)得到
     if (!status.ok()) {
         std::cerr << "Error opening database " << db_path << ": " << status.ToString() << std::endl;
         return 1;

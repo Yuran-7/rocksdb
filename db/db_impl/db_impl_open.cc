@@ -2246,7 +2246,7 @@ Status DBImpl::WriteLevel0TableForRecovery(int job_id, ColumnFamilyData* cfd,
   return s;
 }
 
-// 如果走这个Open，就是没有指定 column family 的情况，就会走默认的default column family
+// 如果走这个Open，就是没有指定 column family 的情况，否则会走下一个Open 函数
 Status DB::Open(const Options& options, const std::string& dbname,
                 std::unique_ptr<DB>* dbptr) {
   DBOptions db_options(options);
@@ -2461,22 +2461,21 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   auto impl = std::make_unique<DBImpl>(db_options, dbname, seq_per_batch,
                                        batch_per_txn);  // 创建 DBImpl 实例，创建了LOG
-  if (!impl->immutable_db_options_.info_log) {  // info_log是Logger对象，写入LOG文件
+  if (!impl->immutable_db_options_.info_log) {  // info_log是Logger对象，写入LOG文件，不进入这个if
     s = impl->init_logger_creation_s_;
     return s;
   } else {
     assert(impl->init_logger_creation_s_.ok()); // 否则必须成功
   }
   // 创建 WAL 目录（如果不存在）
-  // 如果用户设置了 wal_dir，这里就是那个路径；否则等于 dbname
-  s = impl->env_->CreateDirIfMissing(impl->immutable_db_options_.GetWalDir());
+  s = impl->env_->CreateDirIfMissing(impl->immutable_db_options_.GetWalDir());  // "./testdb2"已经创建了，所以啥都不干
   if (s.ok()) {
     std::vector<std::string> paths;
     for (auto& db_path : impl->immutable_db_options_.db_paths) {
       paths.emplace_back(db_path.path);
     }
     for (auto& cf : column_families) {
-      for (auto& cf_path : cf.options.cf_paths) {
+      for (auto& cf_path : cf.options.cf_paths) {   // default 的 cf_paths 是未显式设置的
         paths.emplace_back(cf_path.path);
       }
     }
@@ -2513,7 +2512,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   s = impl->Recover(column_families, false /* read_only */,
                     false /* error_if_wal_file_exists */,
                     false /* error_if_data_exists_in_wals */, is_retry,
-                    &recovered_seq, &recovery_ctx, can_retry);  // 创建了 CURRENT，MANIFEST-000001，LOCK，IDENTITY
+                    &recovered_seq, &recovery_ctx, can_retry);  // 如果为空，创建了 CURRENT，MANIFEST-000001，LOCK，IDENTITY；如果不为空，读取 MANIFEST + 回放 WAL + 重建内存状态
   if (s.ok()) {
     uint64_t new_log_number = impl->versions_->NewFileNumber(); // next_file_number_.fetch_add(1)
     log::Writer* new_log = nullptr;
@@ -2526,7 +2525,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     s = impl->CreateWAL(write_options, new_log_number, 0 /*recycle_log_number*/,
                         preallocate_block_size,
                         PredecessorWALInfo() /* predecessor_wal_info */,
-                        &new_log);  // 创建了000004.log
+                        &new_log);  // 回放的WAL文件会被删除，这里是创建新的WAL文件
     if (s.ok()) {
       // Prevent log files created by previous instance from being recycled.
       // They might be in alive_log_file_, and might get recycled otherwise.
@@ -2542,16 +2541,16 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
     if (s.ok()) {
       impl->alive_wal_files_.emplace_back(impl->cur_wal_number_);
-      // In WritePrepared there could be gap in sequence numbers. This breaks
-      // the trick we use in kPointInTimeRecovery which assumes the first seq in
-      // the log right after the corrupted log is one larger than the last seq
-      // we read from the wals. To let this trick keep working, we add a dummy
-      // entry with the expected sequence to the first log right after recovery.
-      // In non-WritePrepared case also the new log after recovery could be
-      // empty, and thus missing the consecutive seq hint to distinguish
-      // middle-log corruption to corrupted-log-remained-after-recovery. This
-      // case also will be addressed by a dummy write.
-      if (recovered_seq != kMaxSequenceNumber) {  // false
+      // 在 WritePrepared 模式下，可能存在序列号不连续的情况。
+      // 这会破坏我们在 kPointInTimeRecovery 模式中使用的一个技巧：
+      // 即我们假设在损坏日志之后的第一个 log 文件的起始序列号，
+      // 恰好是上一次成功读取的最后一个序列号 + 1。
+      // 为了让这个技巧继续生效，我们在恢复之后的第一个 WAL 中
+      // 添加一个 "空的写入"（dummy entry），其序列号就是我们期望的下一个值。
+      // 即使不是 WritePrepared 模式，恢复后的新日志可能也是空的，
+      // 导致我们无法依靠序列号连续性判断中间日志是否真的损坏，
+      // 或者是残留未清除的旧日志。这种情况也会通过添加 dummy write 解决。
+      if (recovered_seq != kMaxSequenceNumber) {  // 如果数据库之前不是空的，从 WAL 文件中成功恢复了数据，recovered_seq 是一个有效的序列号，会进入这个if
         WriteBatch empty_batch;
         WriteBatchInternal::SetSequence(&empty_batch, recovered_seq);
         uint64_t wal_used, log_size;
@@ -2561,10 +2560,10 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
         assert(log_writer->get_log_number() == wal_file_number_size.number);
         impl->mutex_.AssertHeld();
         s = impl->WriteToWAL(empty_batch, write_options, log_writer, &wal_used,
-                             &log_size, wal_file_number_size, recovered_seq);
+                             &log_size, wal_file_number_size, recovered_seq);   // 将这个空写入实际写入 WAL 文件中
         if (s.ok()) {
           // Need to fsync, otherwise it might get lost after a power reset.
-          s = impl->FlushWAL(write_options, false);
+          s = impl->FlushWAL(write_options, false); // 立即刷新 WAL 文件到磁盘（刷缓冲区），防止系统崩溃导致丢失
           TEST_SYNC_POINT_CALLBACK("DBImpl::Open::BeforeSyncWAL", /*arg=*/&s);
           IOOptions opts;
           if (s.ok()) {
@@ -2572,7 +2571,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
           }
           if (s.ok()) {
             s = log_writer->file()->Sync(opts,
-                                         impl->immutable_db_options_.use_fsync);
+                                         impl->immutable_db_options_.use_fsync);    // 最终执行 fsync 操作，把 WAL 数据彻底写入磁盘
           }
         }
       }
@@ -2607,7 +2606,8 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   }
 
   /*
-  第五步：创建 ColumnFamily handle
+  第五步：创建 ColumnFamily handle，为用户提供操作各个 Column Family 的句柄(Handle)
+  db->Put(write_options, handle, key, value);这里的 handle 就是你要操作的 Column Family。如果你不传入 handle，默认就只会操作 "default" CF。
   */
   if (s.ok()) {
     // set column family handles
@@ -2617,8 +2617,8 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
       if (cfd != nullptr) {
         handles->push_back(
             new ColumnFamilyHandleImpl(cfd, impl.get(), &impl->mutex_));
-        impl->NewThreadStatusCfInfo(cfd);
-        SuperVersionContext sv_context(/* create_superversion */ true);
+        impl->NewThreadStatusCfInfo(cfd);   // 为该列族创建新的线程状态信息
+        SuperVersionContext sv_context(/* create_superversion */ true); // 创建 SuperVersion 上下文，用于安装新的 SuperVersion
         impl->InstallSuperVersionForConfigChange(cfd, &sv_context);
         sv_context.Clean();
       } else {
@@ -2626,9 +2626,8 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
           // missing column family, create it
           ColumnFamilyHandle* handle = nullptr;
           impl->mutex_.Unlock();
-          // NOTE: the work normally done in WrapUpCreateColumnFamilies will
-          // be done separately below.
-          // This includes InstallSuperVersionForConfigChange.
+          // 注意：通常在 WrapUpCreateColumnFamilies 中完成的工作
+          // 将在下面单独完成，包括 InstallSuperVersionForConfigChange
           s = impl->CreateColumnFamilyImpl(read_options, write_options,
                                            cf.options, cf.name, &handle);
           impl->mutex_.Lock();
@@ -2661,11 +2660,11 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   }
 
   if (s.ok()) {
-    for (auto cfd : *impl->versions_->GetColumnFamilySet()) {
+    for (auto cfd : *impl->versions_->GetColumnFamilySet()) {   // 遍历所有列族，检查 MemTable 的功能支持
       if (!cfd->mem()->IsSnapshotSupported()) { // false
-        impl->is_snapshot_supported_ = false;
+        impl->is_snapshot_supported_ = false;   // 检查快照支持
       }
-      if (cfd->ioptions().merge_operator != nullptr &&
+      if (cfd->ioptions().merge_operator != nullptr &&  // 检查合并操作符支持
           !cfd->mem()->IsMergeOperatorSupported()) {  // false
         s = Status::InvalidArgument(
             "The memtable of column family %s does not support merge operator "
@@ -2683,7 +2682,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     // Persist RocksDB Options before scheduling the compaction.
     // The WriteOptionsFile() will release and lock the mutex internally.
     persist_options_status =
-        impl->WriteOptionsFile(write_options, true /*db_mutex_already_held*/);
+        impl->WriteOptionsFile(write_options, true /*db_mutex_already_held*/);  // 将当前的数据库配置写入 OPTIONS 文件
     impl->opened_successfully_ = true;
   } else {
     persist_options_status.PermitUncheckedError();
@@ -2693,8 +2692,11 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   auto sfm = static_cast<SstFileManagerImpl*>(
       impl->immutable_db_options_.sst_file_manager.get());
   if (s.ok() && sfm) {  // true
-    // Set Statistics ptr for SstFileManager to dump the stats of
-    // DeleteScheduler.
+    /*
+    设置 SST 文件管理器的统计信息
+    跟踪现有的数据文件
+    预留磁盘缓冲区空间
+    */
     sfm->SetStatisticsPtr(impl->immutable_db_options_.statistics);
     ROCKS_LOG_INFO(impl->immutable_db_options_.info_log,
                    "SstFileManager instance %p", sfm);
@@ -2726,9 +2728,9 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     }
     impl->mutex_.Lock();
     // This will do a full scan.
-    impl->DeleteObsoleteFiles();
+    impl->DeleteObsoleteFiles();    // 删除过时文件
     TEST_SYNC_POINT("DBImpl::Open:AfterDeleteFiles");
-    impl->MaybeScheduleFlushOrCompaction();
+    impl->MaybeScheduleFlushOrCompaction(); // 可能调度刷盘或压缩
     impl->mutex_.Unlock();
   }
 
@@ -2746,7 +2748,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
         s = WritableFileWriter::PrepareIOOptions(write_options, opts);
         if (s.ok()) {
           s = log_writer->file()->Sync(opts,
-                                       impl->immutable_db_options_.use_fsync);
+                                       impl->immutable_db_options_.use_fsync);  // 强制同步 WAL
         }
       }
     }
@@ -2761,14 +2763,14 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
                    "DB::Open() failed: %s", s.ToString().c_str());
   }
   if (s.ok()) {
-    s = impl->StartPeriodicTaskScheduler();
+    s = impl->StartPeriodicTaskScheduler(); // 启动周期性任务调度器
   }
   if (s.ok()) {
-    s = impl->RegisterRecordSeqnoTimeWorker();
+    s = impl->RegisterRecordSeqnoTimeWorker();  // 注册序列号时间记录工作器
   }
   impl->options_mutex_.Unlock();
   if (s.ok()) {
-    *dbptr = std::move(impl);
+    *dbptr = std::move(impl);   // 将 DBImpl 实例传递给 dbptr
   } else {
     for (auto* h : *handles) {
       delete h;
