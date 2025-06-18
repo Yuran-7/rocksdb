@@ -1,0 +1,65 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/include/rocksdb",
+                "${workspaceFolder}/port",
+                "${workspaceFolder}/port/win", 
+                "${workspaceFolder}/db",
+                "${workspaceFolder}/db/db_impl",
+                "${workspaceFolder}/table", 
+                "${workspaceFolder}/util",
+                "${workspaceFolder}/file",
+                "${workspaceFolder}/env",
+                "${workspaceFolder}/memory",
+                "${workspaceFolder}/cache",
+                "${workspaceFolder}/monitoring",
+                "${workspaceFolder}/options",
+                "${workspaceFolder}/logging",
+                "${workspaceFolder}/test_util",
+                "${workspaceFolder}/tools",
+                "${workspaceFolder}/utilities",
+                "${workspaceFolder}/memtable",
+                "${workspaceFolder}/trace_replay",
+                "${workspaceFolder}/third-party/gtest-1.8.1/fused-src",
+                "/usr/include",
+                "/usr/local/include"
+            ],
+            "defines": [
+                "ROCKSDB_PLATFORM_POSIX",
+                "ROCKSDB_LIB_IO_POSIX", 
+                "OS_LINUX",
+                "ROCKSDB_FALLOCATE_PRESENT",
+                "SNAPPY",
+                "GFLAGS=1",
+                "ZLIB",
+                "BZIP2",
+                "NUMA",
+                "TBB",
+                "ROCKSDB_MALLOC_USABLE_SIZE",
+                "ROCKSDB_PTHREAD_ADAPTIVE_MUTEX",
+                "ROCKSDB_BACKTRACE",
+                "ROCKSDB_RANGESYNC_PRESENT",
+                "ROCKSDB_SCHED_GETCPU_PRESENT",
+                "ROCKSDB_AUXV_GETAUXVAL_PRESENT",
+                "HAVE_UINT128_EXTENSION",
+                "HAVE_ALIGNED_NEW",
+                "ROCKSDB_NAMESPACE=rocksdb",
+                "_GNU_SOURCE"
+            ],
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-faligned-new",
+                "-fno-builtin-memcmp",
+                "-march=native"
+            ]
+        }
+    ],
+    "version": 4
+}

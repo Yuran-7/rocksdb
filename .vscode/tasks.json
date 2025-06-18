@@ -1,0 +1,50 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build rocksdb_debug",
+            "type": "shell",
+            "command": "make clean && make static_lib DEBUG_LEVEL=2 -j60",
+            "problemMatcher": []
+        },
+        {
+            "label": "build workload_runner",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g3",
+                "-O0",
+                "-fno-omit-frame-pointer",
+                "-std=c++17",
+                "-o",
+                "${workspaceFolder}/examples/workload_runner",
+                "${workspaceFolder}/examples/workload_runner.cpp",
+                "${workspaceFolder}/librocksdb_debug.a",
+                "-I${workspaceFolder}/include",
+                "-lz",
+                "-lbz2",
+                "-lsnappy",
+                "-ldl",
+                "-pthread"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples"
+            },
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Compiles 'workload_runner.cpp' with maximum debug symbols and no optimizations."
+        },
+        {
+            "label": "build all",
+            "dependsOn": [
+              "build rocksdb_debug",
+              "build workload_runner"
+            ],
+            "dependsOrder": "sequence",
+            "type": "shell",
+            "problemMatcher": []
+        }
+    ]
+}
