@@ -462,7 +462,7 @@ Status DBImpl::Recover(
     std::string manifest_path;
     if (!immutable_db_options_.best_efforts_recovery) { // 默认走这里
       // 正常恢复模式：检查CURRENT文件
-      s = env_->FileExists(current_fname);  // 没找到
+      s = env_->FileExists(current_fname);  // 没找到"./testdb2/CURRENT"
       std::cout << "s.IsNotFound()" << s.IsNotFound() << std::endl;
     } else {  // Best-efforts恢复模式：查找任何非空的MANIFEST文件
       s = Status::NotFound();
@@ -524,11 +524,11 @@ Status DBImpl::Recover(
       std::unique_ptr<FSRandomAccessFile> idfile;
       FileOptions customized_fs(file_options_);
       customized_fs.use_direct_reads |=
-          immutable_db_options_.use_direct_io_for_flush_and_compaction;
+          immutable_db_options_.use_direct_io_for_flush_and_compaction; // false
       const std::string& fname =
           manifest_path.empty() ? current_fname : manifest_path;  // current_fname为"./testdb2/CURRENT"，manifest_path为""
-      s = fs_->NewRandomAccessFile(fname, customized_fs, &idfile, nullptr);
-      if (!s.ok()) {
+      s = fs_->NewRandomAccessFile(fname, customized_fs, &idfile, nullptr); // 尝试用配置的文件选项（如Direct I/O）打开CURRENT文件或MANIFEST文件
+      if (!s.ok()) { // 不进入这个if
         std::string error_str = s.ToString();
         // 检查是否是Direct I/O不支持导致的错误
         customized_fs.use_direct_reads = false;
@@ -542,7 +542,7 @@ Status DBImpl::Recover(
         }
       }
     }
-  } else if (immutable_db_options_.best_efforts_recovery) {
+  } else if (immutable_db_options_.best_efforts_recovery) { // !read_only
     /*
     第四步：只读模式下的best-efforts恢复准备
     - 获取DB目录中的所有文件列表供后续恢复使用
@@ -574,8 +574,8 @@ Status DBImpl::Recover(
     Status desc_status;  // MANIFEST文件读取状态
     s = versions_->Recover(column_families, read_only, &db_id_,
                            /*no_error_if_files_missing=*/false, is_retry,
-                           &desc_status); // 来自version_set.cc
-    desc_status.PermitUncheckedError();
+                           &desc_status); // 来自version_set.cc，从持久化的MANIFEST文件中完整恢复数据库的版本状态
+    desc_status.PermitUncheckedError(); // 告诉编译器：我知道这个Status可能包含错误，但我故意不检查它
     
     // 处理重试统计
     if (is_retry) {
@@ -621,7 +621,7 @@ Status DBImpl::Recover(
   - 对启用level_compaction_dynamic_level_bytes的CF进行文件下移
   - 将文件从高层级移动到最底层以优化LSM结构
   */
-  if (s.ok() && !read_only) {
+  if (s.ok() && !read_only) {   // s是刚刚recover恢复MANIFEST的状态
     for (auto cfd : *versions_->GetColumnFamilySet()) {
       const auto& moptions = cfd->GetLatestMutableCFOptions();
       // 尝试将文件平凡地向下移动到LSM树的最底层
@@ -730,10 +730,10 @@ Status DBImpl::Recover(
   - 为CF添加目录
   */
   if (s.ok() && !read_only) {
-    s = MaybeUpdateNextFileNumber(recovery_ctx);
+    s = MaybeUpdateNextFileNumber(recovery_ctx);    // 验证从MANIFEST恢复的next_file_number_是否正确，如果（全局）实际文件编号比恢复的编号大，则更新next_file_number_
   }
 
-  if (immutable_db_options_.paranoid_checks && s.ok()) {
+  if (immutable_db_options_.paranoid_checks && s.ok()) {    // 进入
     s = CheckConsistency();  // 执行一致性检查
   }
   
@@ -765,18 +765,18 @@ Status DBImpl::Recover(
                                     mutable_cf_options.max_write_buffer_number;
     }
 
-    SequenceNumber next_sequence(kMaxSequenceNumber);
+    SequenceNumber next_sequence(kMaxSequenceNumber);   // 2的56次方减1
     default_cf_handle_ = new ColumnFamilyHandleImpl(
-        versions_->GetColumnFamilySet()->GetDefault(), this, &mutex_);
+        versions_->GetColumnFamilySet()->GetDefault(), this, &mutex_);  // 一定有一个default的列族
     default_cf_internal_stats_ = default_cf_handle_->cfd()->internal_stats();
 
-    // 从比描述符中记录的更新的日志文件中恢复
-    auto wal_dir = immutable_db_options_.GetWalDir();
+    // 从（比）描述符中记录的（更）新的日志文件中恢复
+    auto wal_dir = immutable_db_options_.GetWalDir();   // ./testdb2
     if (!immutable_db_options_.best_efforts_recovery) {
       IOOptions io_opts;
-      io_opts.do_not_recurse = true;
+      io_opts.do_not_recurse = true;    // 不递归搜索
       s = immutable_db_options_.fs->GetChildren(
-          wal_dir, io_opts, &files_in_wal_dir, /*IODebugContext*=*/nullptr);
+          wal_dir, io_opts, &files_in_wal_dir, /*IODebugContext*=*/nullptr);    // 收集到files_in_wal_dir
     }
     if (s.IsNotFound()) {
       return Status::InvalidArgument("wal_dir not found", wal_dir);
@@ -789,7 +789,7 @@ Status DBImpl::Recover(
     for (const auto& file : files_in_wal_dir) {
       uint64_t number;
       FileType type;
-      if (ParseFileName(file, &number, &type) && type == kWalFile) {
+      if (ParseFileName(file, &number, &type) && type == kWalFile) {    
         if (is_new_db) {
           return Status::Corruption(
               "While creating a new Db, wal_dir contains "
@@ -803,16 +803,16 @@ Status DBImpl::Recover(
 
     // WAL跟踪和验证
     if (immutable_db_options_.track_and_verify_wals && !is_new_db &&
-        !immutable_db_options_.best_efforts_recovery && wal_files.empty()) {
+        !immutable_db_options_.best_efforts_recovery && wal_files.empty()) {    // false
       return Status::Corruption("Opening an existing DB with no WAL files");
     }
 
-    if (immutable_db_options_.track_and_verify_wals_in_manifest) {
+    if (immutable_db_options_.track_and_verify_wals_in_manifest) {   // false
       if (!immutable_db_options_.best_efforts_recovery) {
         // 验证MANIFEST中的WAL
         s = versions_->GetWalSet().CheckWals(env_, wal_files);
       }
-    } else if (!versions_->GetWalSet().GetWals().empty()) {
+    } else if (!versions_->GetWalSet().GetWals().empty()) { // false
       // 清除之前跟踪的WAL信息
       VersionEdit edit;
       WalNumber max_wal_number =
@@ -877,7 +877,7 @@ Status DBImpl::Recover(
         }
       }
     }
-  }
+  } // if (s.ok())
 
   /*
   第十一步：只读模式下的选项文件处理
@@ -2252,9 +2252,9 @@ Status DB::Open(const Options& options, const std::string& dbname,
   DBOptions db_options(options);
   ColumnFamilyOptions cf_options(options);
   std::vector<ColumnFamilyDescriptor> column_families;
-  column_families.emplace_back(kDefaultColumnFamilyName, cf_options);   // 只添加了一个default column family
+  column_families.emplace_back(kDefaultColumnFamilyName, cf_options);   // emplace_back，在 vector 内直接构造对象（避免 copy）
   if (db_options.persist_stats_to_disk) { // 默认false
-    column_families.emplace_back(kPersistentStatsColumnFamilyName, cf_options);
+    column_families.emplace_back(kPersistentStatsColumnFamilyName, cf_options); // "___rocksdb_stats_history___"
   }
   std::vector<ColumnFamilyHandle*> handles; // 这是一个合法的值类型实例，&handles不为nullptr
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
@@ -2461,7 +2461,6 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   auto impl = std::make_unique<DBImpl>(db_options, dbname, seq_per_batch,
                                        batch_per_txn);  // 创建 DBImpl 实例，创建了LOG
-  // TODO，不管怎么调试，都不走这个if-else，啥情况
   if (!impl->immutable_db_options_.info_log) {  // info_log是Logger对象，写入LOG文件
     s = impl->init_logger_creation_s_;
     return s;
@@ -2505,22 +2504,21 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   /*
   第二步：恢复数据库，创建新的WAL编号，dummy WAL 记录，同步到磁盘
   */
-  RecoveryContext recovery_ctx;
+  RecoveryContext recovery_ctx; // db_impl.h
   impl->options_mutex_.Lock();
   impl->mutex_.Lock();
 
   // Handles create_if_missing, error_if_exists
   uint64_t recovered_seq(kMaxSequenceNumber); // 72057594037927935，2的56次方减1，而不是64bit
-  // TODO，无法自动跳转到函数里面，但是可以手动
   s = impl->Recover(column_families, false /* read_only */,
                     false /* error_if_wal_file_exists */,
                     false /* error_if_data_exists_in_wals */, is_retry,
                     &recovered_seq, &recovery_ctx, can_retry);  // 创建了 CURRENT，MANIFEST-000001，LOCK，IDENTITY
   if (s.ok()) {
-    uint64_t new_log_number = impl->versions_->NewFileNumber();
+    uint64_t new_log_number = impl->versions_->NewFileNumber(); // next_file_number_.fetch_add(1)
     log::Writer* new_log = nullptr;
     const size_t preallocate_block_size =
-        impl->GetWalPreallocateBlockSize(max_write_buffer_size);  // 创建了000004.log
+        impl->GetWalPreallocateBlockSize(max_write_buffer_size);  // 计算WAL文件的预分配块大小
     // TODO(hx235): Pass in the correct `predecessor_wal_info` for the first WAL
     // created during DB open with predecessor WALs from previous DB session due
     // to `avoid_flush_during_recovery == true`. This can protect the last WAL
@@ -2528,7 +2526,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
     s = impl->CreateWAL(write_options, new_log_number, 0 /*recycle_log_number*/,
                         preallocate_block_size,
                         PredecessorWALInfo() /* predecessor_wal_info */,
-                        &new_log);
+                        &new_log);  // 创建了000004.log
     if (s.ok()) {
       // Prevent log files created by previous instance from being recycled.
       // They might be in alive_log_file_, and might get recycled otherwise.
@@ -2539,7 +2537,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
       impl->cur_wal_number_ = new_log_number;
       assert(new_log != nullptr);
       assert(impl->logs_.empty());
-      impl->logs_.emplace_back(new_log_number, new_log);
+      impl->logs_.emplace_back(new_log_number, new_log);  // new_log是Writer指针对象
     }
 
     if (s.ok()) {
@@ -2553,7 +2551,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
       // empty, and thus missing the consecutive seq hint to distinguish
       // middle-log corruption to corrupted-log-remained-after-recovery. This
       // case also will be addressed by a dummy write.
-      if (recovered_seq != kMaxSequenceNumber) {
+      if (recovered_seq != kMaxSequenceNumber) {  // false
         WriteBatch empty_batch;
         WriteBatchInternal::SetSequence(&empty_batch, recovered_seq);
         uint64_t wal_used, log_size;
@@ -2584,27 +2582,27 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   第三步：写入 MANIFEST（LogAndApply）
   */
   if (s.ok()) {
-    s = impl->LogAndApplyForRecovery(recovery_ctx);
+    s = impl->LogAndApplyForRecovery(recovery_ctx); // 简单的包装器，实际工作由 VersionSet::LogAndApply 完成
   }
   /*
   第四步：初始化统计 Column Family（可选）
   */
 
-  if (s.ok() && !impl->immutable_db_options_.write_identity_file) {
+  if (s.ok() && !impl->immutable_db_options_.write_identity_file) { // false
     // On successful recovery, delete an obsolete IDENTITY file to avoid DB ID
     // inconsistency
     impl->env_->DeleteFile(IdentityFileName(impl->dbname_))
         .PermitUncheckedError();
   }
 
-  if (s.ok() && impl->immutable_db_options_.persist_stats_to_disk) {
+  if (s.ok() && impl->immutable_db_options_.persist_stats_to_disk) {  // false
     impl->mutex_.AssertHeld();
     s = impl->InitPersistStatsColumnFamily();
   }
 
   // After reaching the post-recovery seqno but before creating SuperVersions
   // ensure seqno to time mapping is pre-populated as needed.
-  if (s.ok() && recovery_ctx.is_new_db_ && preserve_info.IsEnabled()) {
+  if (s.ok() && recovery_ctx.is_new_db_ && preserve_info.IsEnabled()) { // false
     impl->PrepopulateSeqnoToTimeMapping(preserve_info);
   }
 
@@ -2650,7 +2648,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   /*
   第六步：清理无用文件 & 启动调度器。持久化配置，清理旧文件，启动调度器，回传指针
   */
-  if (s.ok() && impl->immutable_db_options_.persist_stats_to_disk) {
+  if (s.ok() && impl->immutable_db_options_.persist_stats_to_disk) {  // false
     // Install SuperVersion for hidden column family
     assert(impl->persist_stats_cf_handle_);
     assert(impl->persist_stats_cf_handle_->cfd());
@@ -2664,11 +2662,11 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   if (s.ok()) {
     for (auto cfd : *impl->versions_->GetColumnFamilySet()) {
-      if (!cfd->mem()->IsSnapshotSupported()) {
+      if (!cfd->mem()->IsSnapshotSupported()) { // false
         impl->is_snapshot_supported_ = false;
       }
       if (cfd->ioptions().merge_operator != nullptr &&
-          !cfd->mem()->IsMergeOperatorSupported()) {
+          !cfd->mem()->IsMergeOperatorSupported()) {  // false
         s = Status::InvalidArgument(
             "The memtable of column family %s does not support merge operator "
             "its options.merge_operator is non-null",
@@ -2694,7 +2692,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   auto sfm = static_cast<SstFileManagerImpl*>(
       impl->immutable_db_options_.sst_file_manager.get());
-  if (s.ok() && sfm) {
+  if (s.ok() && sfm) {  // true
     // Set Statistics ptr for SstFileManager to dump the stats of
     // DeleteScheduler.
     sfm->SetStatisticsPtr(impl->immutable_db_options_.statistics);

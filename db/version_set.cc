@@ -6097,7 +6097,14 @@ Status VersionSet::LogAndApplyHelper(ColumnFamilyData* cfd,
   assert(builder || edit->IsWalManipulation());
   return builder ? builder->Apply(edit) : Status::OK();
 }
-
+/*
+读取CURRENT文件：获取当前MANIFEST文件路径和编号
+打开MANIFEST文件：创建顺序文件读取器
+解析MANIFEST内容：使用VersionEditHandler逐条读取和处理VersionEdit记录
+恢复关键状态：包括日志编号、下一个文件编号、最后序列号等
+重建版本信息：恢复所有Column Family的文件层级结构和元数据
+验证和记录：确保恢复成功并记录关键信息到日志
+*/
 Status VersionSet::Recover(
     const std::vector<ColumnFamilyDescriptor>& column_families, bool read_only,
     std::string* db_id, bool no_error_if_files_missing, bool is_retry,
