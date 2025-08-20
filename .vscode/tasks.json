@@ -4,7 +4,7 @@
         {
             "label": "build rocksdb_debug",
             "type": "shell",
-            "command": "make clean && make static_lib DEBUG_LEVEL=2 -j60",
+            "command": "make clean && make static_lib DEBUG_LEVEL=1 -j60",
             "problemMatcher": []
         },
         {
@@ -24,8 +24,10 @@
                 "-lz",
                 "-lbz2",
                 "-lsnappy",
-                "-ldl",
-                "-pthread"
+                "-llz4",
+                "-lzstd",
+                // "-ldl",
+                // "-pthread"
             ],
             "options": {
                 "cwd": "${workspaceFolder}/examples"

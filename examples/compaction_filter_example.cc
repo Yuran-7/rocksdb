@@ -10,6 +10,7 @@
 
 class MyMerge : public ROCKSDB_NAMESPACE::MergeOperator {
  public:
+  // MergeOperator的一个虚函数，是FullMerge的新版本，功能更强大
   bool FullMergeV2(const MergeOperationInput& merge_in,
                    MergeOperationOutput* merge_out) const override {
     merge_out->new_value.clear();
@@ -21,7 +22,7 @@ class MyMerge : public ROCKSDB_NAMESPACE::MergeOperator {
       fprintf(stderr, "Merge(%s)\n", m.ToString().c_str());
       // the compaction filter filters out bad values
       assert(m.ToString() != "bad");
-      merge_out->new_value.assign(m.data(), m.size());
+      merge_out->new_value.assign(m.data(), m.size());  // assign会覆盖之前的值
     }
     return true;
   }
@@ -37,15 +38,16 @@ class MyFilter : public ROCKSDB_NAMESPACE::CompactionFilter {
     fprintf(stderr, "Filter(%s)\n", key.ToString().c_str());
     ++count_;
     assert(*value_changed == false);
-    return false;
+    return false;   // 对，return false 表示不会过滤该键值对，数据会被保留。
   }
 
+  // 这也是重写CompactionFilter的方法
   bool FilterMergeOperand(
       int level, const ROCKSDB_NAMESPACE::Slice& key,
       const ROCKSDB_NAMESPACE::Slice& existing_value) const override {
     fprintf(stderr, "FilterMerge(%s)\n", key.ToString().c_str());
     ++merge_count_;
-    return existing_value == "bad";
+    return existing_value == "bad"; // 仅仅 merge 的操作数（operand）会被丢弃，existing_value 对应的键值对依旧会参与合并、保留
   }
 
   const char* Name() const override { return "MyFilter"; }

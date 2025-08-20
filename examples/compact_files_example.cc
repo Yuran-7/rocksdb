@@ -82,6 +82,7 @@ class FullCompactor : public Compactor {
   // When flush happens, it determines whether to trigger compaction. If
   // triggered_writes_stop is true, it will also set the retry flag of
   // compaction-task to true.
+  // 重写了父类的EventListener的 OnFlushCompleted 方法
   void OnFlushCompleted(DB* db, const FlushJobInfo& info) override {
     CompactionTask* task = PickCompaction(db, info.cf_name);
     if (task != nullptr) {
@@ -89,6 +90,7 @@ class FullCompactor : public Compactor {
         task->retry_on_fail = true;
       }
       // Schedule compaction in a different thread.
+      // 这意味着，真正执行 db->CompactFiles() 这个耗时I/O操作的，不是触发事件的那个线程，而是一个独立的后台线程。
       ScheduleCompaction(task);
     }
   }
@@ -102,11 +104,12 @@ class FullCompactor : public Compactor {
     for (auto level : cf_meta.levels) {
       for (auto file : level.files) {
         if (file.being_compacted) {
-          return nullptr;
+          return nullptr;   // 只要有一个文件正在被压缩（being_compacted 为 true），则本例的 PickCompaction 会直接返回 nullptr，不会生成压缩任务
         }
         input_file_names.push_back(file.name);
       }
     }
+    // 尝试将所有 level 的所有 SST 文件一次性地合并到最高 level
     return new CompactionTask(db, this, cf_name, input_file_names,
                               options_.num_levels - 1, compact_options_, false);
   }
@@ -120,9 +123,11 @@ class FullCompactor : public Compactor {
     std::unique_ptr<CompactionTask> task(static_cast<CompactionTask*>(arg));
     assert(task);
     assert(task->db);
+    // 这个CompactFiles函数是db提供的
     Status s = task->db->CompactFiles(
         task->compact_options, task->input_file_names, task->output_level);
     printf("CompactFiles() finished with status %s\n", s.ToString().c_str());
+    // 属于失败重试，不属于递归
     if (!s.ok() && !s.IsIOError() && task->retry_on_fail) {
       // If a compaction task with its retry_on_fail=true failed,
       // try to schedule another compaction in case the reason
@@ -141,7 +146,7 @@ class FullCompactor : public Compactor {
 int main() {
   Options options;
   options.create_if_missing = true;
-  // Disable RocksDB background compaction.
+  // Disable RocksDB background compaction. 这个才是关键，数据库就不会在后台自动合并文件了，控制权完全交给了开发者。
   options.compaction_style = ROCKSDB_NAMESPACE::kCompactionStyleNone;
   // Small write buffer size for generating more sst files in level 0.
   options.write_buffer_size = 4 << 20;

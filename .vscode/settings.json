@@ -85,11 +85,13 @@
         "*.h": "cpp",
         "*.cc": "cpp",
         "*.cpp": "cpp",
-        "*.mk": "makefile"
+        "*.mk": "makefile",
+        "ios": "cpp",
+        "locale": "cpp"
     },
     "files.exclude": {
         "**/*.o": true,
-        "**/*.so": true,
+        // "**/*.so": true,
         "**/build": true,
         "**/*.d": true
     }

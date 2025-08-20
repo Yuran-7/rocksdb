@@ -243,12 +243,13 @@ void RunPrimary() {
 }
 
 void secondary_instance_sigint_handler(int signal) {
-  ShouldSecondaryWait().store(0, std::memory_order_relaxed);
+  ShouldSecondaryWait().store(0, std::memory_order_relaxed);    // 这一步的作用是让 secondary 实例安全、及时地终止运行
   fprintf(stdout, "\n");
   fflush(stdout);
 };
 
 void RunSecondary() {
+  // signal是一个函数，::表示全局命名空间，secondary_instance_sigint_handler是一个信号处理函数
   ::signal(SIGINT, secondary_instance_sigint_handler);
   long my_pid = static_cast<long>(getpid());
   const std::string kSecondaryPath =
@@ -265,7 +266,7 @@ void RunSecondary() {
   DB* db = nullptr;
   Options options;
   options.create_if_missing = false;
-  options.max_open_files = -1;
+  options.max_open_files = -1;  // 设置为 -1 以允许打开所有文件
   Status s = DB::OpenAsSecondary(options, kDBPath, kSecondaryPath, &db);
   if (!s.ok()) {
     fprintf(stderr, "[process %ld] Failed to open in secondary mode: %s\n",
@@ -330,7 +331,7 @@ void RunSecondary() {
     }
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
-  s = db->TryCatchUpWithPrimary();
+  s = db->TryCatchUpWithPrimary();  // 收到ctrl+c信号后，尝试再次与主实例同步
   if (!s.ok()) {
     fprintf(stderr,
             "[process %ld] error while trying to catch up with "
@@ -345,6 +346,11 @@ void RunSecondary() {
   }
   std::vector<ColumnFamilyHandle*> handles;
   DB* verification_db = nullptr;
+  /*
+  在 secondary 进程的主线程中，先用 OpenAsSecondary 打开一个 secondary 模式的数据库实例（db），
+  后面用 OpenForReadOnly 再打开一个只读模式的数据库实例（verification_db）。
+  这两个实例都在同一个进程、同一个主线程中创建和使用
+  */
   s = DB::OpenForReadOnly(options, kDBPath, column_families, &handles,
                           &verification_db);
   assert(s.ok());

@@ -39,8 +39,8 @@ int main(int argc, char* argv[]) {
     long long range_query_count = 0; // For range query operations
     long long total_data_size_bytes = 0; // For calculating throughput
     
-
-    rocksdb::Status s = rocksdb::DestroyDB(db_path, options); // TODO，无法调试
+    rocksdb::Status s;
+    s = rocksdb::DestroyDB(db_path, options); // TODO，无法调试
     if (!s.ok()) {
         std::cerr << "DestroyDB failed: " << s.ToString() << std::endl;
         return 1;
@@ -169,7 +169,8 @@ int main(int argc, char* argv[]) {
 
 
     workload_file.close();
-    delete db; // Close the database
+    delete it;     // 重要：释放迭代器
+    delete db;     // 关闭数据库
 
     std::cout << "Database closed." << std::endl;
 

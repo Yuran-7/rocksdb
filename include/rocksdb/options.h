@@ -534,6 +534,7 @@ struct CompactionServiceScheduleResponse {
 // Exceptions MUST NOT propagate out of overridden functions into RocksDB,
 // because RocksDB is not exception-safe. This could cause undefined behavior
 // including data loss, unreported corruption, deadlocks, and more.
+// RocksDB 中的一个实验性功能，它允许将压缩（compaction）操作卸载到不同的主机或进程上执行，从而减轻主数据库服务器的后台负载。
 class CompactionService : public Customizable {
  public:
   static const char* Type() { return "CompactionService"; }
