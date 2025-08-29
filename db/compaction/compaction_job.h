@@ -58,7 +58,7 @@ class Version;
 class VersionEdit;
 class VersionSet;
 
-class SubcompactionState;
+class SubcompactionState;   // 不是成员变量
 
 // CompactionJob is responsible for executing the compaction. Each (manual or
 // automated) compaction corresponds to a CompactionJob object, and usually
@@ -68,7 +68,7 @@ class SubcompactionState;
 //
 // CompactionJob has 2 main stats:
 // 1. CompactionJobStats job_stats_
-//    CompactionJobStats is a public data structure which is part of Compaction
+//    CompactionJobStats is a public（其实是protected） data structure which is part of Compaction
 //    event listener that rocksdb share the job stats with the user.
 //    Internally it's an aggregation of all the compaction_job_stats from each
 //    `SubcompactionState`:
@@ -79,7 +79,7 @@ class SubcompactionState;
 //                                |          |                        |
 //                                |          +------------------------+
 // +------------------------+     |
-// | CompactionJob          |     |          +------------------------+
+// | CompactionJobStats     |     |          +------------------------+
 // |                        |     |          | SubcompactionState     |
 // |   job_stats            +-----+          |                        |
 // |                        |     +--------->|   compaction_job_stats |
@@ -167,7 +167,7 @@ class CompactionJob {
   virtual ~CompactionJob();
 
   // no copy/move
-  CompactionJob(CompactionJob&& job) = delete;
+  CompactionJob(CompactionJob&& job) = delete;  // 移动构造函数
   CompactionJob(const CompactionJob& job) = delete;
   CompactionJob& operator=(const CompactionJob& job) = delete;
 
@@ -193,7 +193,7 @@ class CompactionJob {
   Status Install(bool* compaction_released);
 
   // Return the IO status
-  IOStatus io_status() const { return io_status_; }
+  IOStatus io_status() const { return io_status_; } // 相当于getter函数
 
  protected:
   void UpdateCompactionJobOutputStats(
@@ -206,8 +206,8 @@ class CompactionJob {
   // Iterate through input and compact the kv-pairs.
   void ProcessKeyValueCompaction(SubcompactionState* sub_compact);
 
-  CompactionState* compact_;
-  InternalStats::CompactionStatsFull internal_stats_;
+  CompactionState* compact_;    // 含有std::vector<SubcompactionState> sub_compact_states;
+  InternalStats::CompactionStatsFull internal_stats_;   // InternalStats是类，CompactionStatsFull是其内部结构体
   const ImmutableDBOptions& db_options_;
   const MutableDBOptions mutable_db_options_copy_;
   LogBuffer* log_buffer_;
@@ -218,7 +218,7 @@ class CompactionJob {
 
   Env::WriteLifeTimeHint write_hint_;
 
-  IOStatus io_status_;
+  IOStatus io_status_;  // include/rocksdb/io_status.h
 
   CompactionJobStats* job_stats_;
 

@@ -38,7 +38,7 @@ class IOStatus : public Status {
   };
 
   // Create a success status.
-  IOStatus() : IOStatus(kOk, kNone) {}
+  IOStatus() : IOStatus(kOk, kNone) {}  // 委托构造函数，kNone是SubCode
   ~IOStatus() {}
 
   // Copy the specified status.
