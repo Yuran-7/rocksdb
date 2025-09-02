@@ -25,6 +25,7 @@
                 "${workspaceFolder}/memtable",
                 "${workspaceFolder}/trace_replay",
                 "${workspaceFolder}/third-party/gtest-1.8.1/fused-src",
+                "/home/ysh/faiss",
                 "/usr/include",
                 "/usr/local/include"
             ],

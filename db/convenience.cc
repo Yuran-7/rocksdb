@@ -10,6 +10,10 @@
 #include "db/db_impl/db_impl.h"
 #include "util/cast_util.h"
 
+/*
+convenience.cc 是 RocksDB 的 便利工具库，提供了数据库维护、文件管理、完整性检查等实用功能。
+它作为用户 API 和内部实现之间的桥梁，让用户能够方便地执行常见的数据库管理任务，而无需直接操作复杂的内部数据结构。
+*/
 namespace ROCKSDB_NAMESPACE {
 
 void CancelAllBackgroundWork(DB* db, bool wait) {

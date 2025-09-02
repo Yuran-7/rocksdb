@@ -48,6 +48,7 @@ namespace ROCKSDB_NAMESPACE {
 
 class TableFactory;
 
+// BuildTable 内部会调用 NewTableBuilder 来创建一个 TableBuilder 实例
 TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
                               WritableFileWriter* file) {
   assert((tboptions.column_family_id ==
@@ -55,7 +56,16 @@ TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
          tboptions.column_family_name.empty());
   return tboptions.moptions.table_factory->NewTableBuilder(tboptions, file);
 }
-
+/*
+创建文件写入器 (WritableFileWriter)
+调用 NewTableBuilder 创建 table builder
+使用 CompactionIterator 遍历输入数据
+通过 builder->Add() 将键值对添加到 table
+处理 range deletion tombstones
+调用 builder->Finish() 完成 table 构建
+同步和关闭文件
+验证生成的 table 文件
+*/
 Status BuildTable(
     const std::string& dbname, VersionSet* versions,
     const ImmutableDBOptions& db_options, const TableBuilderOptions& tboptions,

@@ -49,8 +49,9 @@ class SimpleSecondaryIndex : public SecondaryIndex {
                                secondary_value) const override;
 
  private:
-  std::string primary_column_name_;
-  ColumnFamilyHandle* primary_column_family_{};
+  // 抽象类SecondaryIndex没有成员变量
+  std::string primary_column_name_; // 通过构造函数初始化
+  ColumnFamilyHandle* primary_column_family_{}; // 初始化为nullptr，如果没有{}，可能会出现垃圾值
   ColumnFamilyHandle* secondary_column_family_{};
 };
 

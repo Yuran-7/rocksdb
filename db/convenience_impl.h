@@ -7,6 +7,11 @@
 #include "rocksdb/db.h"
 
 namespace ROCKSDB_NAMESPACE {
+/*
+验证单个 SST 文件的完整性
+通过校验和检测文件损坏
+用于数据一致性检查和故障诊断
+*/
 Status VerifySstFileChecksumInternal(const Options& options,
                                      const EnvOptions& env_options,
                                      const ReadOptions& read_options,

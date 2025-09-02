@@ -25,7 +25,7 @@ class TransactionDBMutexFactory;
 
 enum TxnDBWritePolicy {
   // Write data at transaction commit time
-  WRITE_COMMITTED = 0,
+  WRITE_COMMITTED = 0,  // 读未提交，读已提交，可重复读，串行化
 
   // EXPERIMENTAL: The remaining write policies are not as mature, well
   // validated, nor as compatible with other features as WRITE_COMMITTED.

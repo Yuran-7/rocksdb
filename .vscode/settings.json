@@ -87,7 +87,9 @@
         "*.cpp": "cpp",
         "*.mk": "makefile",
         "ios": "cpp",
-        "locale": "cpp"
+        "locale": "cpp",
+        "hash_map": "cpp",
+        "hash_set": "cpp"
     },
     "files.exclude": {
         "**/*.o": true,

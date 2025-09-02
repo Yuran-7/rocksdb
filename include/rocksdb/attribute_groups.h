@@ -18,7 +18,7 @@ class ColumnFamilyHandle;
 class AttributeGroup {
  public:
   explicit AttributeGroup(ColumnFamilyHandle* column_family,
-                          const WideColumns& columns)
+                          const WideColumns& columns)   // 注意这个参数是 using WideColumns = std::vector<WideColumn>
       : column_family_(column_family), columns_(columns) {}
 
   ColumnFamilyHandle* column_family() const { return column_family_; }
