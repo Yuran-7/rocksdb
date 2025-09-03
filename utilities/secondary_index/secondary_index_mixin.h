@@ -213,8 +213,8 @@ class SecondaryIndexMixin : public Txn {
 
   // 带保存点执行操作：失败时自动回滚
   template <typename Operation>
-  Status PerformWithSavePoint(Operation&& operation) {
-    Txn::SetSavePoint();
+  Status PerformWithSavePoint(Operation&& operation) {   // 转发引用的语法，条件1: 这是一个函数模板， 条件2: 参数形式为 T&&
+    Txn::SetSavePoint();  // utilities/transactions/transaction_base.cc内的void TransactionBaseImpl::SetSavePoint()函数
 
     const Status s = operation();
 

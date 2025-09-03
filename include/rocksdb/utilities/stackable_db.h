@@ -18,7 +18,7 @@
 namespace ROCKSDB_NAMESPACE {
 
 // This class contains APIs to stack rocksdb wrappers.Eg. Stack TTL over base d
-class StackableDB : public DB {
+class StackableDB : public DB { // Stackable（可堆叠的）：意思是这种 DB 可以像积木一样“叠加”在一个基础 DB 之上
  public:
   // StackableDB take sole ownership of the underlying db.
   explicit StackableDB(DB* db) : db_(db) {}

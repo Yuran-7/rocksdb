@@ -60,7 +60,7 @@ int main(int argc, char* argv[]) {
     txn_db_options.secondary_indices.emplace_back(faiss_ivf_index); // 可以有多个二级索引，这里添加 FAISS 索引
 
     TransactionDB* db = nullptr;
-    TransactionDB::Open(options, txn_db_options, db_path, &db);
+    TransactionDB::Open(options, txn_db_options, db_path, &db); // 最终db应该是WriteCommittedTxnDB类型的
     std::unique_ptr<TransactionDB> db_guard(db);
 
     ColumnFamilyOptions cf1_opts;
@@ -80,14 +80,20 @@ int main(int argc, char* argv[]) {
 
     {
         start_time = std::chrono::high_resolution_clock::now();
+        // 在 TransactionDB 的基类声明的BeginTransaction函数有三个参数，其中两个有默认参数，所以这里只需要填一个参数即可
+        // 此时txn是SecondaryIndexMixin<WriteCommittedTxn>类型的，SecondaryIndexMixin继承WriteCommittedTxn
         std::unique_ptr<Transaction> txn(db->BeginTransaction(WriteOptions()));
+
         for (faiss::idx_t i = 0; i < num_vectors; ++i) {
             const std::string primary_key = std::to_string(i);  // 主键为数字字符串
             WideColumns w = {
                 {primary_column_name,
                  ConvertFloatsToSlice(embeddings.data() + i * dim, dim)}};
-            txn->PutEntity(cfh1, primary_key,std::move(w));  // 将浮点数组转换为 Slice
+            // PutEntity在最早的基类Transaction中就是纯虚函数，后续经过很多个子类的重写，最后是SecondaryIndexMixin类的实现
+            // SecondaryIndexMixin -> WriteCommittedTxn -> 
+            txn->PutEntity(cfh1, primary_key, std::move(w));
         }
+
         txn->Commit();
         end_time = std::chrono::high_resolution_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);

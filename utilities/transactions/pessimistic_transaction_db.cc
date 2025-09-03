@@ -186,7 +186,7 @@ Transaction* WriteCommittedTxnDB::BeginTransaction(
   } else {
     if (!txn_db_options_.secondary_indices.empty()) {
       return new SecondaryIndexMixin<WriteCommittedTxn>(
-          &txn_db_options_.secondary_indices, this, write_options, txn_options);
+          &txn_db_options_.secondary_indices, this, write_options, txn_options);  // SecondaryIndexMixin继承WriteCommittedTxn
     } else {
       return new WriteCommittedTxn(this, write_options, txn_options);
     }
@@ -262,7 +262,7 @@ Status TransactionDB::Open(
       txn_db_options.write_policy == WRITE_PREPARED;
   s = DBImpl::Open(db_options_2pc, dbname, column_families_copy, handles, &db,
                    use_seq_per_batch, use_batch_per_txn,
-                   /*is_retry=*/false, /*can_retry=*/nullptr);
+                   /*is_retry=*/false, /*can_retry=*/nullptr);  // db/db_impl/db_impl_open.cc中的最后一个Open函数
   if (s.ok()) {
     ROCKS_LOG_WARN(db->GetDBOptions().info_log,
                    "Transaction write_policy is %" PRId32,
@@ -270,7 +270,7 @@ Status TransactionDB::Open(
     // if WrapDB return non-ok, db will be deleted in WrapDB() via
     // ~StackableDB().
     s = WrapDB(db.release(), txn_db_options, compaction_enabled_cf_indices,
-               *handles, dbptr);
+               *handles, dbptr);  // dbptr是WriteCommittedTxnDB类型的
   }
   return s;
 }
@@ -320,7 +320,7 @@ Status WrapAnotherDBInternal(
       break;
     case WRITE_COMMITTED:
     default:
-      txn_db.reset(new WriteCommittedTxnDB(
+      txn_db.reset(new WriteCommittedTxnDB( // 继承了PessimisticTransactionDB
           db, PessimisticTransactionDB::ValidateTxnDBOptions(txn_db_options)));
   }
   txn_db->UpdateCFComparatorMap(handles);
@@ -328,7 +328,7 @@ Status WrapAnotherDBInternal(
   // In case of a failure at this point, db is deleted via the txn_db destructor
   // and set to nullptr.
   if (s.ok()) {
-    *dbptr = txn_db.release();
+    *dbptr = txn_db.release();  // 将 txn_db 这个智能指针所管理的对象的所有权，转移给调用者（通过 dbptr 指针）。
   } else {
     for (auto* h : handles) {
       delete h;
@@ -348,6 +348,7 @@ Status TransactionDB::WrapDB(
     DB* db, const TransactionDBOptions& txn_db_options,
     const std::vector<size_t>& compaction_enabled_cf_indices,
     const std::vector<ColumnFamilyHandle*>& handles, TransactionDB** dbptr) {
+  // 编译器自动推导DBType = DB
   return WrapAnotherDBInternal(db, txn_db_options,
                                compaction_enabled_cf_indices, handles, dbptr);
 }
