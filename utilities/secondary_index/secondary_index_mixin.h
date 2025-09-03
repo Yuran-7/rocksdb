@@ -139,7 +139,7 @@ class SecondaryIndexMixin : public Txn {
   Status PutEntityUntracked(ColumnFamilyHandle* column_family, const Slice& key,
                             const WideColumns& columns) override {
     return PerformWithSavePoint([&]() {
-      constexpr bool do_validate = false;
+      constexpr bool do_validate = false; // 完全 跳过 validate 逻辑，适用于一些调用场景下，调用者已经保证了 key/索引等状态是安全的，不需要额外检查
       return PutEntityWithSecondaryIndices(column_family, key, columns,
                                            do_validate);
     });
@@ -214,9 +214,11 @@ class SecondaryIndexMixin : public Txn {
   // 带保存点执行操作：失败时自动回滚
   template <typename Operation>
   Status PerformWithSavePoint(Operation&& operation) {   // 转发引用的语法，条件1: 这是一个函数模板， 条件2: 参数形式为 T&&
-    Txn::SetSavePoint();  // utilities/transactions/transaction_base.cc内的void TransactionBaseImpl::SetSavePoint()函数
+    // utilities/transactions/transaction_base.cc内的void TransactionBaseImpl::SetSavePoint()函数
+    // 要加::，不然编译会报错，详情请看examples/demo1.cpp
+    Txn::SetSavePoint();
 
-    const Status s = operation();
+    const Status s = operation(); // 调用lambda函数
 
     if (!s.ok()) {
       [[maybe_unused]] const Status st = Txn::RollbackToSavePoint();
@@ -493,7 +495,7 @@ class SecondaryIndexMixin : public Txn {
     // TODO: we could avoid removing and recreating secondary entries for
     // which neither the secondary key prefix nor the value has changed
 
-    if (!column_family) {
+    if (!column_family) { // 传入的是cfh1
       column_family = Txn::DefaultColumnFamily();
     }
 
@@ -503,14 +505,14 @@ class SecondaryIndexMixin : public Txn {
       PinnableWideColumns existing_primary_columns;
 
       const Status s = GetPrimaryEntryForUpdate(
-          column_family, primary_key, &existing_primary_columns, do_validate);
+          column_family, primary_key, &existing_primary_columns, do_validate);  // s.ok()表示找到了，s.IsNotFound()表示没找到
       if (!s.ok()) {
         if (!s.IsNotFound()) {
           return s;
         }
       } else {
         const Status st = RemoveSecondaryEntries(
-            column_family, primary_key, existing_primary_columns.columns());
+            column_family, primary_key, existing_primary_columns.columns());  // 删除与该主键关联的所有二级索引条目
         if (!st.ok()) {
           return st;
         }
@@ -523,22 +525,22 @@ class SecondaryIndexMixin : public Txn {
     {
       const Status s = UpdatePrimaryColumnValues(column_family, primary_key,
                                                  primary_value_or_columns,
-                                                 applicable_indices);
-      if (!s.ok()) {
+                                                 applicable_indices); // 哪些二级索引需要修改（填充到 applicable_indices）
+      if (!s.ok()) {  
         return s;
       }
     }
 
     {
       const Status s =
-          AddPrimaryEntry(column_family, primary_key, primary_value_or_columns);
+          AddPrimaryEntry(column_family, primary_key, primary_value_or_columns);  // 内部会调用 RocksDB 的 Put 或者 Merge，以 primary_key 作为 key，primary_value_or_columns 作为 value
       if (!s.ok()) {
         return s;
       }
     }
 
     {
-      const Status s = AddSecondaryEntries(primary_key, applicable_indices);
+      const Status s = AddSecondaryEntries(primary_key, applicable_indices);  // 更新二级索引表
       if (!s.ok()) {
         return s;
       }

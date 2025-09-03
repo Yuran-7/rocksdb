@@ -176,11 +176,11 @@ void TransactionBaseImpl::SetSavePoint() {
   if (save_points_ == nullptr) {
     save_points_.reset(
         new std::stack<TransactionBaseImpl::SavePoint,
-                       autovector<TransactionBaseImpl::SavePoint>>());
+                       autovector<TransactionBaseImpl::SavePoint>>());  // 一个事务，第一次会创建save_points_
   }
   save_points_->emplace(snapshot_, snapshot_needed_, snapshot_notifier_,
                         num_puts_, num_put_entities_, num_deletes_, num_merges_,
-                        lock_tracker_factory_);
+                        lock_tracker_factory_); // 每个事务对象（TransactionBaseImpl 的实例）都有自己独立的一个 save_points_
   write_batch_.SetSavePoint();
 }
 

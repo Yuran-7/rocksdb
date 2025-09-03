@@ -436,8 +436,9 @@ class TransactionBaseImpl : public Transaction {
   // lock requests.
   std::unique_ptr<LockTracker> tracked_locks_;
 
-  // Stack of the Snapshot saved at each save point. Saved snapshots may be
-  // nullptr if there was no snapshot at the time SetSavePoint() was called.
+  // 这是一个 栈，用来存放 SavePoint 结构体
+  // std::stack 是一个 容器适配器，它需要一个底层容器（默认是 std::deque<T>）
+  // 这里 RocksDB 选择了 autovector，这是 RocksDB 自己实现的容器
   std::unique_ptr<std::stack<TransactionBaseImpl::SavePoint,
                              autovector<TransactionBaseImpl::SavePoint>>>
       save_points_;

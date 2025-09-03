@@ -118,7 +118,7 @@ g++ -g3 -O0  -fno-omit-frame-pointer -std=c++17 \
     /home/ysh/faiss/build/faiss/libfaiss.so \
     -Wl,-rpath=/home/ysh/faiss/build/faiss \
     -lz -lbz2 -lsnappy -llz4 -lzstd -lnuma -ltbb \
-    -llapack -lblas -lgfortran \
+    -llapack -lblas  \
     -lpthread -ldl \
     -o examples/faiss_runner
 */
