@@ -237,13 +237,13 @@ Status WriteCommittedTxn::GetEntityForUpdate(const ReadOptions& read_options,
         "Cannot call GetEntityForUpdate without a column family handle");
   }
 
-  const Comparator* const ucmp = column_family->GetComparator();
+  const Comparator* const ucmp = column_family->GetComparator();  // 等价于 const Comparator& ucmp
   assert(ucmp);
-  const size_t ts_sz = ucmp->timestamp_size();
+  const size_t ts_sz = ucmp->timestamp_size();  // 列簇里的所有 key 的 timestamp 部分占多少字节，如果返回 0，就表示这个列簇没有时间戳
 
-  if (ts_sz == 0) {
+  if (ts_sz == 0) { // 默认不带时间戳
     return TransactionBaseImpl::GetEntityForUpdate(
-        read_options, column_family, key, columns, exclusive, do_validate);
+        read_options, column_family, key, columns, exclusive, do_validate); // exclusive为ture，do_validate为true
   }
 
   assert(ts_sz > 0);

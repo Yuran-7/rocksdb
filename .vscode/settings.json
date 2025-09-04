@@ -89,7 +89,8 @@
         "ios": "cpp",
         "locale": "cpp",
         "hash_map": "cpp",
-        "hash_set": "cpp"
+        "hash_set": "cpp",
+        "cassert": "cpp"
     },
     "files.exclude": {
         "**/*.o": true,

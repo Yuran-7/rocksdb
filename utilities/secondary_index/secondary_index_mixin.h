@@ -233,7 +233,7 @@ class SecondaryIndexMixin : public Txn {
     return Status::OK();
   }
 
-  // 获取主表条目用于更新（加排他锁）
+  // 获取主表的primary_key，看看是否有数据，如果有数据，就把数据存到existing_primary_columns（加排他锁）
   Status GetPrimaryEntryForUpdate(ColumnFamilyHandle* column_family,
                                   const Slice& primary_key,
                                   PinnableWideColumns* existing_primary_columns,
