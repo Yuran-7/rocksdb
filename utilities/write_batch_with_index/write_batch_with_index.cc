@@ -926,7 +926,7 @@ Status WriteBatchWithIndex::GetEntityFromBatchAndDB(
   }
 
   if (result == WBWIIteratorImpl::kDeleted) {
-    return Status::NotFound();
+    return Status::NotFound();  // s.IsNotFound();
   }
 
   assert(result == WBWIIteratorImpl::kMergeInProgress ||
@@ -941,7 +941,7 @@ Status WriteBatchWithIndex::GetEntityFromBatchAndDB(
   get_impl_options.callback = callback;
 
   s = static_cast_with_check<DBImpl>(db->GetRootDB())
-          ->GetImpl(read_options, key, get_impl_options);
+          ->GetImpl(read_options, key, get_impl_options); // 如果 s.IsNotFound()，这个状态会被直接返回
 
   if (result == WBWIIteratorImpl::kMergeInProgress) {
     if (s.ok() || s.IsNotFound()) {  // DB lookup succeeded

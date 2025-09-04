@@ -233,7 +233,7 @@ class SecondaryIndexMixin : public Txn {
     return Status::OK();
   }
 
-  // 获取主表的primary_key，看看是否有数据，如果有数据，就把数据存到existing_primary_columns（加排他锁）
+  // 用主表的primary_key搜索，看看是否有数据，如果有数据，就把数据存到existing_primary_columns（加排他锁）
   Status GetPrimaryEntryForUpdate(ColumnFamilyHandle* column_family,
                                   const Slice& primary_key,
                                   PinnableWideColumns* existing_primary_columns,
@@ -245,10 +245,10 @@ class SecondaryIndexMixin : public Txn {
 
     return Txn::GetEntityForUpdate(ReadOptions(), column_family, primary_key,
                                    existing_primary_columns, exclusive,
-                                   do_validate);
+                                   do_validate);  // WriteCommittedTxn::GetEntityForUpdate
   }
 
-  // 删除单个二级索引条目
+  // 删除二级索引的单个条目
   Status RemoveSecondaryEntry(const SecondaryIndex* secondary_index,
                               const Slice& primary_key,
                               const Slice& existing_primary_column_value) {
@@ -258,7 +258,7 @@ class SecondaryIndexMixin : public Txn {
 
     {
       const Status s = secondary_index->GetSecondaryKeyPrefix(
-          primary_key, existing_primary_column_value, &secondary_key_prefix);
+          primary_key, existing_primary_column_value, &secondary_key_prefix); // 把聚类的簇的id，从existing_primary_column_value复制到secondary_key_prefix
       if (!s.ok()) {
         return s;
       }
@@ -274,7 +274,7 @@ class SecondaryIndexMixin : public Txn {
 
     const std::string secondary_key =
         SecondaryIndexHelper::AsString(secondary_key_prefix) +
-        primary_key.ToString();
+        primary_key.ToString(); // secondary_key = 聚类的簇的id + primary_key
 
     return Txn::SingleDelete(secondary_index->GetSecondaryColumnFamily(),
                              secondary_key);
@@ -291,6 +291,15 @@ class SecondaryIndexMixin : public Txn {
   }
 
   // 添加主表条目（宽列版本）
+  // 将经过UpdatePrimaryColumnValues处理后的数据写入主数据列族（cf1）。
+  //
+  // 以FaissIVFIndex为例：
+  // 写入的数据是：
+  // - Key: 原始主键 (e.g., "42")
+  // - Value (宽列): {"embedding": <聚类中心ID>}
+  //
+  // 注意：这里写入的不再是原始的向量数据，而是它所属的聚类ID。
+  // 原始向量数据被保存在了 applicable_indices 中，用于下一步生成二级索引。
   Status AddPrimaryEntry(ColumnFamilyHandle* column_family,
                          const Slice& primary_key,
                          const WideColumns& primary_columns) {
@@ -299,7 +308,7 @@ class SecondaryIndexMixin : public Txn {
     constexpr bool assume_tracked = true;
 
     return Txn::PutEntity(column_family, primary_key, primary_columns,
-                          assume_tracked);
+                          assume_tracked);  // 调用链：WriteCommittedTxn::PutEntity -> WriteCommittedTxn::PutEntityImpl -> WriteCommittedTxn::Operate
   }
 
   // 添加单个二级索引条目
@@ -313,7 +322,7 @@ class SecondaryIndexMixin : public Txn {
 
     {
       const Status s = secondary_index->GetSecondaryKeyPrefix(
-          primary_key, primary_column_value, &secondary_key_prefix);
+          primary_key, primary_column_value, &secondary_key_prefix);  // 把聚类的簇的id，从primary_column_value复制到secondary_key_prefix
       if (!s.ok()) {
         return s;
       }
@@ -321,7 +330,7 @@ class SecondaryIndexMixin : public Txn {
 
     {
       const Status s =
-          secondary_index->FinalizeSecondaryKeyPrefix(&secondary_key_prefix);
+          secondary_index->FinalizeSecondaryKeyPrefix(&secondary_key_prefix); // 啥都不干
       if (!s.ok()) {
         return s;
       }
@@ -341,7 +350,7 @@ class SecondaryIndexMixin : public Txn {
     {
       const std::string secondary_key =
           SecondaryIndexHelper::AsString(secondary_key_prefix) +
-          primary_key.ToString();
+          primary_key.ToString(); // secondary_key = 聚类的簇的id + primary_key
 
       const Status s =
           Txn::Put(secondary_index->GetSecondaryColumnFamily(), secondary_key,
@@ -359,29 +368,29 @@ class SecondaryIndexMixin : public Txn {
   // 批量删除所有相关的二级索引条目
   Status RemoveSecondaryEntries(ColumnFamilyHandle* column_family,
                                 const Slice& primary_key,
-                                const WideColumns& existing_columns) {
+                                const WideColumns& existing_columns) {  // cf1，lable(id)，宽列数据
     assert(column_family);
 
     for (const auto& secondary_index : *secondary_indices_) {
       assert(secondary_index);
 
-      if (secondary_index->GetPrimaryColumnFamily() != column_family) {
+      if (secondary_index->GetPrimaryColumnFamily() != column_family) { // GetPrimaryColumnFamily获取id所在的列簇
         continue;
       }
 
       const auto it = WideColumnsHelper::Find(
           existing_columns.cbegin(), existing_columns.cend(),
-          secondary_index->GetPrimaryColumnName());
+          secondary_index->GetPrimaryColumnName()); // GetPrimaryColumnName()是embedding，it是执行宽列中的embedding列
       if (it == existing_columns.cend()) {
         continue;
       }
 
       const Status st =
-          RemoveSecondaryEntry(secondary_index.get(), primary_key, it->value());
+          RemoveSecondaryEntry(secondary_index.get(), primary_key, it->value());  // secondary_index是智能指针，get()获取裸指针；primary_key是label(id)；it->value()是embedding列的值
       if (!st.ok()) {
         return st;
       }
-    }
+    } // for
 
     return Status::OK();
   }
@@ -425,7 +434,6 @@ class SecondaryIndexMixin : public Txn {
     return Status::OK();
   }
 
-  // 更新主列值（宽列版本）：处理多列的索引更新
   Status UpdatePrimaryColumnValues(ColumnFamilyHandle* column_family,
                                    const Slice& primary_key,
                                    WideColumns& primary_columns,
@@ -437,6 +445,17 @@ class SecondaryIndexMixin : public Txn {
     // in WriteBatchInternal::PutEntity
     WideColumnsHelper::SortColumns(primary_columns);
 
+    // 遍历所有二级索引，为本次Put操作预处理数据，并将受影响的索引信息存入
+    // applicable_indices，以便后续创建索引条目。
+    //
+    // 以FaissIVFIndex为例：
+    // 1. 调用 secondary_index->UpdatePrimaryColumnValue。
+    // 2. 在该函数内部，使用FAISS的粗量化器为输入的向量（it->value()）找到其所属的聚类中心ID（label）。
+    // 3. 将这个聚类ID序列化后，通过 updated_column_value 返回。
+    // 4. Mixin将这个返回的聚类ID覆盖掉宽列中原始的向量值（it->value() = ...）。
+    // 5. 将这个索引的元数据（包括原始向量值）存入 applicable_indices。
+    //
+    // 结果：primary_columns 中的向量值被替换为聚类ID，为下一步写入主表做好了准备。
     applicable_indices.reserve(secondary_indices_->size());
 
     for (const auto& secondary_index : *secondary_indices_) {
@@ -454,24 +473,34 @@ class SecondaryIndexMixin : public Txn {
       }
 
       applicable_indices.emplace_back(
-          IndexData(secondary_index.get(), it->value()));
+          IndexData(secondary_index.get(), it->value())); // 构造函数传递两个参数，const SecondaryIndex* index, const Slice& previous_column_value
 
       auto& index_data = applicable_indices.back();
 
       const Status s = secondary_index->UpdatePrimaryColumnValue(
           primary_key, index_data.previous_column_value(),
-          &index_data.updated_column_value());
+          &index_data.updated_column_value());  // previous_column_value()是向量，updated_column_value()是聚类ID
       if (!s.ok()) {
         return s;
       }
 
-      it->value() = index_data.primary_column_value();
+      it->value() = index_data.primary_column_value();  // index_data中如果有updated_column_value_，就返回updated_column_value_，所以这里相当于把it->value()替换成了聚类ID，实实在在会影响传入的参数 WideColumns& primary_columns
     }
 
     return Status::OK();
   }
 
   // 批量添加二级索引条目
+  // 遍历 applicable_indices 列表，为每个受影响的索引在二级索引列族（cf2）中创建一条记录。
+  //
+  // 以FaissIVFIndex为例，内部调用的 AddSecondaryEntry 会：
+  // 1. 调用 secondary_index->GetSecondaryKeyPrefix，传入聚类ID，直接返回该ID作为Key前缀。
+  // 2. 调用 secondary_index->GetSecondaryValue，传入聚类ID和原始向量值。
+  //    此函数计算向量与聚类中心的残差，并生成细量化编码（fine-quantized code）作为二级索引的Value。
+  // 3. 构造二级索引的Key: [聚类ID] + [原始主键]。
+  // 4. 将 Key 和 Value（细量化编码）写入二级索引列族 cf2。
+  //
+  // 结果：在cf2中创建了倒排列表，实现了 "聚类ID -> 属于该聚类的向量列表" 的映射。
   Status AddSecondaryEntries(const Slice& primary_key,
                              const autovector<IndexData>& applicable_indices) {
     for (const auto& index_data : applicable_indices) {
@@ -507,10 +536,10 @@ class SecondaryIndexMixin : public Txn {
       const Status s = GetPrimaryEntryForUpdate(
           column_family, primary_key, &existing_primary_columns, do_validate);  // s.ok()表示找到了，s.IsNotFound()表示没找到
       if (!s.ok()) {
-        if (!s.IsNotFound()) {
+        if (!s.IsNotFound()) {  // Status::NotFound();
           return s;
         }
-      } else {
+      } else {  // s.IsNotFound() = true → 不会进入 else，只是跳过，继续后续逻辑
         const Status st = RemoveSecondaryEntries(
             column_family, primary_key, existing_primary_columns.columns());  // 删除与该主键关联的所有二级索引条目
         if (!st.ok()) {
@@ -523,9 +552,10 @@ class SecondaryIndexMixin : public Txn {
     autovector<IndexData> applicable_indices;
 
     {
+      // 核心函数
       const Status s = UpdatePrimaryColumnValues(column_family, primary_key,
-                                                 primary_value_or_columns,
-                                                 applicable_indices); // 哪些二级索引需要修改（填充到 applicable_indices）
+                                                 primary_value_or_columns,  // cfh1，label(id)，宽列数据
+                                                 applicable_indices);
       if (!s.ok()) {  
         return s;
       }

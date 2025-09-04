@@ -266,6 +266,8 @@ Status FaissIVFIndex::UpdatePrimaryColumnValue(
 
   try {
     // index_是IndexIVF类型的，quantizer是IndexIVF内部的struct Index*，assign是Index的方法，本质上是搜索
+    // assign函数还有一个参数k表示topk，默认是1
+    // 函数的目的就是获取向量最近的k个簇的编号，放入label中
     index_->quantizer->assign(n, embedding, &label);
   } catch (const std::exception& e) {
     return Status::InvalidArgument(e.what());

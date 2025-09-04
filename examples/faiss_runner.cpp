@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
     // 创建 IVF 索引：IndexIVFFlat 是倒排文件索引，将向量空间分为多个区域
     auto index = std::make_unique<faiss::IndexIVFFlat>(quantizer.get(), dim, num_lists);
 
-    constexpr faiss::idx_t num_vectors = 1000;  // 测试向量数量
+    constexpr faiss::idx_t num_vectors = 1000000;  // 测试向量数量
     std::vector<float> embeddings(dim * num_vectors);  // 存储所有向量的数组
     faiss::float_rand(embeddings.data(), dim * num_vectors, 42);  // 42是种子，生成随机向量数据
 
@@ -55,6 +55,7 @@ int main(int argc, char* argv[]) {
     
     Options options;
     options.create_if_missing = true;  // 如果数据库不存在则创建
+    options.write_buffer_size = 16 * 1024 * 1024; // 比如 16MB
 
     TransactionDBOptions txn_db_options;
     txn_db_options.secondary_indices.emplace_back(faiss_ivf_index); // 可以有多个二级索引，这里添加 FAISS 索引
@@ -80,6 +81,7 @@ int main(int argc, char* argv[]) {
 
     {
         start_time = std::chrono::high_resolution_clock::now();
+        const size_t batch_size = 10000; // 每 10000 次写入提交一次事务
         // 在 TransactionDB 的基类声明的BeginTransaction函数有三个参数，其中两个有默认参数，所以这里只需要填一个参数即可
         // 此时txn是SecondaryIndexMixin<WriteCommittedTxn>类型的，SecondaryIndexMixin继承WriteCommittedTxn
         std::unique_ptr<Transaction> txn(db->BeginTransaction(WriteOptions()));
@@ -92,9 +94,18 @@ int main(int argc, char* argv[]) {
             // PutEntity在最早的基类Transaction中就是纯虚函数，后续经过很多个子类的重写，最后是SecondaryIndexMixin类的实现
             // SecondaryIndexMixin -> WriteCommittedTxn -> 
             txn->PutEntity(cfh1, primary_key, std::move(w));
+            // 当达到批处理大小时，提交当前事务并开始新事务
+            if ((i + 1) % batch_size == 0) {
+                txn->Commit();
+                // 重新开始一个新的事务
+                txn.reset(db->BeginTransaction(WriteOptions()));
+            }
         }
 
-        txn->Commit();
+        // 提交最后一批可能不足 batch_size 的数据
+        if (txn->GetNumKeys() > 0) {
+            txn->Commit();
+        }
         end_time = std::chrono::high_resolution_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         std::cout << "Put time: " << duration.count()/1000.0 << " 秒\n";
