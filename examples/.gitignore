@@ -11,3 +11,4 @@ transaction_example
 workload_runner
 faiss_db
 faiss_runner
+faiss_search

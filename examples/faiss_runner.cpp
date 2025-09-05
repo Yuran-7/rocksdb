@@ -11,6 +11,7 @@
 #include "faiss/utils/random.h"
 #include "rocksdb/utilities/secondary_index_faiss.h"
 #include "rocksdb/utilities/transaction_db.h"
+#include "util/coding.h"
 
 using namespace rocksdb;
 
@@ -55,7 +56,7 @@ int main(int argc, char* argv[]) {
     
     Options options;
     options.create_if_missing = true;  // 如果数据库不存在则创建
-    options.write_buffer_size = 16 * 1024 * 1024; // 比如 16MB
+    options.disable_auto_compactions = false;
 
     TransactionDBOptions txn_db_options;
     txn_db_options.secondary_indices.emplace_back(faiss_ivf_index); // 可以有多个二级索引，这里添加 FAISS 索引
@@ -65,11 +66,15 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<TransactionDB> db_guard(db);
 
     ColumnFamilyOptions cf1_opts;
+    cf1_opts.write_buffer_size = 16 * 1024 * 1024;
+    cf1_opts.target_file_size_base = 32 * 1024 * 1024;
     ColumnFamilyHandle* cfh1 = nullptr;
     db->CreateColumnFamily(cf1_opts, "cf1", &cfh1);
     std::unique_ptr<ColumnFamilyHandle> cfh1_guard(cfh1);
 
     ColumnFamilyOptions cf2_opts;
+    cf2_opts.write_buffer_size = 16 * 1024 * 1024;
+    cf2_opts.target_file_size_base = 64 * 1024 * 1024;
     ColumnFamilyHandle* cfh2 = nullptr;
     db->CreateColumnFamily(cf2_opts, "cf2", &cfh2);
     std::unique_ptr<ColumnFamilyHandle> cfh2_guard(cfh2);
@@ -106,11 +111,90 @@ int main(int argc, char* argv[]) {
         if (txn->GetNumKeys() > 0) {
             txn->Commit();
         }
+        // db->Flush(FlushOptions(), cfh1);
+        // db->Flush(FlushOptions(), cfh2);
+
         end_time = std::chrono::high_resolution_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         std::cout << "Put time: " << duration.count()/1000.0 << " 秒\n";
 
     }
+
+    {
+        size_t num_found = 0;  // 找到的条目数
+        // 创建迭代器遍历辅助列族（存储索引数据）
+        std::unique_ptr<Iterator> it(db->NewIterator(ReadOptions(), cfh2));
+        start_time = std::chrono::high_resolution_clock::now();
+        for (it->SeekToFirst(); it->Valid(); it->Next()) {
+            Slice key = it->key();
+            faiss::idx_t label = -1;
+            GetVarsignedint64(&key, &label);
+            faiss::idx_t id = -1;
+            std::from_chars(key.data(), key.data() + key.size(), id);
+            if(label >=0 && label < num_lists && id >= 0 && id < num_vectors) {
+                if(it->value().compare(ConvertFloatsToSlice(embeddings.data() + id * dim, dim)) == 0) {
+                    num_found++;
+                }     
+            }
+        }
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        std::cout << "Iterator time: " << duration.count()/1000.0 << " 秒\n";
+        std::cout << "Found " << num_found <<  " entries in the index.\n";
+    }
+
+    std::unique_ptr<Iterator> underlying_it(db->NewIterator(ReadOptions(), cfh2));  // 普通 RocksDB 的迭代器
+    // 创建二级索引迭代器，用于向量相似性搜索
+    auto secondary_it = std::make_unique<SecondaryIndexIterator>(
+        faiss_ivf_index.get(), std::move(underlying_it));   // 二级索引封装后的迭代器，由 RocksDB 的 FaissIVFIndex + 原始迭代器共同驱动
+    // Lambda 函数：从 Slice 格式的 key 中解析出向量 ID
+    auto get_id = [](const Slice& key) -> faiss::idx_t {
+      faiss::idx_t id = -1;
+
+      if (std::from_chars(key.data(), key.data() + key.size(), id).ec !=
+          std::errc()) {
+        return -1;
+      }
+
+      return id;
+    };
+
+    constexpr size_t neighbors = 10;  // 查询最近的 10 个邻居
+
+
+    auto verify = [&](faiss::idx_t id) {
+        std::vector<std::pair<std::string, float>> result;
+        faiss_ivf_index->FindKNearestNeighbors(
+            secondary_it.get(),
+            ConvertFloatsToSlice(embeddings.data() + id * dim, dim), neighbors,
+            num_lists, &result);
+
+        const faiss::idx_t first_id = get_id(result[0].first);
+        if(first_id == id && result[0].second < 1e-5) {
+            std::cout << "first_id true" << std::endl;
+        } else {
+            std::cout << "Verification failed for id " << id << ": expected "
+                      << id << " with distance 0, got " << first_id
+                      << " with distance " << result[0].second << "\n";
+            return ;
+        }
+
+        for (size_t i = 1; i < neighbors; ++i) {
+            const faiss::idx_t other_id = get_id(result[i].first);
+            if(result[i].second >= result[i - 1].second) {
+                continue;
+            } else {
+                std::cout << "Verification failed for id " << id << ": neighbor "
+                          << i << " has smaller distance " << result[i].second
+                          << " than first neighbor " << result[0].second << "\n";
+                return ;
+            }
+        }
+    };
+
+    verify(0);
+    verify(num_vectors / 2);
+    verify(num_vectors - 1);
 
 }
 
