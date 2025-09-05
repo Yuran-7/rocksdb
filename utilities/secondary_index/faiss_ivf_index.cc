@@ -44,7 +44,7 @@ struct FaissIVFIndex::KNNContext {
 };
 
 // FAISS倒排列表适配器类：将RocksDB的存储接口适配为FAISS的倒排列表接口
-class FaissIVFIndex::Adapter : public faiss::InvertedLists {
+class FaissIVFIndex::Adapter : public faiss::InvertedLists {  // InvertedLists是一个抽象基类，纯虚函数必须重写
  public:
   Adapter(size_t num_lists, size_t code_size)
       : faiss::InvertedLists(num_lists, code_size) {
@@ -123,7 +123,7 @@ class FaissIVFIndex::Adapter : public faiss::InvertedLists {
 
  private:
   // 迭代器适配器：将RocksDB迭代器适配为FAISS倒排列表迭代器
-  class IteratorAdapter : public faiss::InvertedListsIterator {
+  class IteratorAdapter : public faiss::InvertedListsIterator { // InvertedListsIterator是独立于InvertedLists的一个抽象基类
    public:
     // 构造迭代器适配器
     IteratorAdapter(KNNContext* knn_context, size_t list_no, size_t code_size)

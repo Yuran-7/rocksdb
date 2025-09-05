@@ -159,7 +159,8 @@ int main(int argc, char* argv[]) {
       return id;
     };
 
-    constexpr size_t neighbors = 10;  // 查询最近的 10 个邻居
+    constexpr size_t neighbors = 10;  // 查询最近的邻居
+    constexpr size_t probes = 1;      // 搜索倒排列表
 
 
     auto verify = [&](faiss::idx_t id) {
@@ -167,7 +168,7 @@ int main(int argc, char* argv[]) {
         faiss_ivf_index->FindKNearestNeighbors(
             secondary_it.get(),
             ConvertFloatsToSlice(embeddings.data() + id * dim, dim), neighbors,
-            num_lists, &result);
+            probes, &result);
 
         const faiss::idx_t first_id = get_id(result[0].first);
         if(first_id == id && result[0].second < 1e-5) {
@@ -192,10 +193,14 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    verify(0);
-    verify(num_vectors / 2);
-    verify(num_vectors - 1);
-
+    start_time = std::chrono::high_resolution_clock::now();
+    for(faiss::idx_t i = 0; i < 500; ++i) {
+        verify(rand() % num_vectors);
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << "Search time: " << duration.count()/1000.0 << " 秒\n";
+    std::cout << "QPS: " << 500.0/(duration.count()/1000.0) << " 次/秒\n";
 }
 
 /*

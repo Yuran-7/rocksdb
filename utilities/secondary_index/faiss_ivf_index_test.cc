@@ -277,7 +277,7 @@ TEST(FaissIVFIndexTest, Compare) {
       std::make_unique<faiss::IndexIVFFlat>(quantizer.get(), dim, num_lists);  // RocksDB 用的索引
 
   {
-    constexpr faiss::idx_t num_train = 1024;  // 训练数据数量
+    constexpr faiss::idx_t num_train = 1024;  // 训练数据数量，不是数据库向量数量
     std::vector<float> embeddings_train(dim * num_train);
     faiss::float_rand(embeddings_train.data(), dim * num_train, 42);
 
@@ -288,7 +288,7 @@ TEST(FaissIVFIndexTest, Compare) {
 
   // 使用默认宽列名创建 RocksDB 的 FAISS 索引
   auto faiss_ivf_index = std::make_shared<FaissIVFIndex>(
-      std::move(index), kDefaultWideColumnName.ToString());
+      std::move(index), kDefaultWideColumnName.ToString()); // 从"embedding"改为"kDefaultWideColumnName"
 
   const std::string db_name = test::PerThreadDBPath("faiss_ivf_index_test");
   EXPECT_OK(DestroyDB(db_name, Options()));
@@ -320,7 +320,7 @@ TEST(FaissIVFIndexTest, Compare) {
 
   // Add the same set of database vectors to both indices
   // 向两个索引添加相同的数据库向量集合
-  constexpr faiss::idx_t num_db = 4096;  // 数据库向量数量
+  constexpr faiss::idx_t num_db = 4096;  // 数据库向量数量，大于训练数量1024
 
   {
     std::vector<float> embeddings_db(dim * num_db);
@@ -335,7 +335,7 @@ TEST(FaissIVFIndexTest, Compare) {
       const std::string primary_key = std::to_string(i);
       // 向 RocksDB 添加向量数据（这会自动更新二级索引）
       ASSERT_OK(db->Put(WriteOptions(), cfh1, primary_key,
-                        ConvertFloatsToSlice(embedding, dim)));
+                        ConvertFloatsToSlice(embedding, dim))); // 没有用事务和宽列
     }
   }
 
