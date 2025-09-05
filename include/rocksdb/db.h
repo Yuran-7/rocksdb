@@ -36,7 +36,7 @@
 #include "rocksdb/wide_columns.h"
 
 #if defined(__GNUC__) || defined(__clang__)
-#define ROCKSDB_DEPRECATED_FUNC __attribute__((__deprecated__))
+#define ROCKSDB_DEPRECATED_FUNC __attribute__((__deprecated__)) // 在函数返回类型前使用，ROCKSDB_DEPRECATED_FUNC或__attribute__((__deprecated__))，表示函数被弃用
 #elif _WIN32
 #define ROCKSDB_DEPRECATED_FUNC __declspec(deprecated)
 #endif
@@ -122,7 +122,7 @@ struct GetMergeOperandsOptions {
 };
 
 // A collections of table properties objects, where
-//  key: is the table's file name.
+//  key: is the table's file name. 000005.sst
 //  value: the table properties object of the given table.
 using TablePropertiesCollection =
     std::unordered_map<std::string, std::shared_ptr<const TableProperties>>;

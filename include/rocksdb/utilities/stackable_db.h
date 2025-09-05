@@ -16,6 +16,7 @@
 #endif
 
 namespace ROCKSDB_NAMESPACE {
+// StackableDB是一个典型的装饰器模式，继承接口 + 组合接口实例
 
 // This class contains APIs to stack rocksdb wrappers.Eg. Stack TTL over base d
 class StackableDB : public DB { // Stackable（可堆叠的）：意思是这种 DB 可以像积木一样“叠加”在一个基础 DB 之上
