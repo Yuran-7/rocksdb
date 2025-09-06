@@ -177,6 +177,7 @@ Status PessimisticTransactionDB::Initialize(
   return s;
 }
 
+// db->BeginTransaction(WriteOptions())，txn_db_options_是db的成员变量
 Transaction* WriteCommittedTxnDB::BeginTransaction(
     const WriteOptions& write_options, const TransactionOptions& txn_options,
     Transaction* old_txn) {
@@ -379,7 +380,7 @@ Status PessimisticTransactionDB::CreateColumnFamily(
     return s;
   }
 
-  s = db_->CreateColumnFamily(options, column_family_name, handle);
+  s = db_->CreateColumnFamily(options, column_family_name, handle); // db_来自于StackableDB，虽然是DB* 类型的，由于多态性，实际上会调用到 DBImpl::CreateColumnFamily 的具体实现
   if (s.ok()) {
     lock_manager_->AddColumnFamily(*handle);
     UpdateCFComparatorMap(*handle);

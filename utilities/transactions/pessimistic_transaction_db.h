@@ -44,7 +44,7 @@ class PessimisticTransactionDB : public TransactionDB {
 
   Transaction* BeginTransaction(const WriteOptions& write_options,
                                 const TransactionOptions& txn_options,
-                                Transaction* old_txn) override = 0;
+                                Transaction* old_txn) override = 0; // 说明PessimisticTransactionDB是一个抽象类
 
   using StackableDB::Put;
   Status Put(const WriteOptions& options, ColumnFamilyHandle* column_family,
@@ -209,7 +209,7 @@ class PessimisticTransactionDB : public TransactionDB {
                                      timestamped_snapshots) const override;
 
  protected:
-  DBImpl* db_impl_;
+  DBImpl* db_impl_; // 已经有了db_，还需要db_impl_的原因是，有一些DBImpl特有的接口需要调用
   std::shared_ptr<Logger> info_log_;
   const TransactionDBOptions txn_db_options_;
 

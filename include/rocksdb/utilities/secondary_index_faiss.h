@@ -49,18 +49,18 @@ class FaissIVFIndex : public SecondaryIndex {
 
   Slice GetPrimaryColumnName() const override;
 
-  // 在插入或更新期间可选地更新主列值（用于FAISS量化处理）
+  // primary_column_value是embedding，updated_column_value是聚簇id，primary_key未使用
   Status UpdatePrimaryColumnValue(
       const Slice& primary_key, const Slice& primary_column_value,
       std::optional<std::variant<Slice, std::string>>* updated_column_value)
       const override;
 
-  // 获取二级索引键前缀（基于FAISS聚类标签）
+  // 把primary_column_value的值赋值给secondary_key_prefix
   Status GetSecondaryKeyPrefix(
       const Slice& primary_key, const Slice& primary_column_value,
       std::variant<Slice, std::string>* secondary_key_prefix) const override;
 
-  // 最终确定二级索引键前缀
+  // 啥都没干，返回OK
   Status FinalizeSecondaryKeyPrefix(
       std::variant<Slice, std::string>* secondary_key_prefix) const override;
 
@@ -107,7 +107,7 @@ class FaissIVFIndex : public SecondaryIndex {
   struct KNNContext;  // K近邻搜索上下文
   class Adapter;      // FAISS倒排列表适配器。可以认为是FaissIVFIndex的内部类，只不过这个内部类在类外定义的
 
-  std::unique_ptr<Adapter> adapter_;              // RocksDB到FAISS的适配器
+  std::unique_ptr<Adapter> adapter_;              // 适配器，适配InvertedLists，它IndexIVF的一个成员变量，内部维护了 nlist 个独立的列表，是向量ID和编码后数据的最终存储位置
   std::unique_ptr<faiss::IndexIVF> index_;        // FAISS IVF索引实例
   std::string primary_column_name_;               // 告诉RocksDB要为主数据的哪一列建立索引
   ColumnFamilyHandle* primary_column_family_{};   // 告诉RocksDB主数据存储在哪个列族中

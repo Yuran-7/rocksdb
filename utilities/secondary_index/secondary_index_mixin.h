@@ -20,6 +20,7 @@
 #include "utilities/secondary_index/secondary_index_helper.h"
 
 // 此头文件，只被utilities/transactions/pessimistic_transaction_db.cc一个源文件引用
+// 所以这个头文件是会参与到librocksdb.a的编译的，而具体的二级索引实现是不参与的
 namespace ROCKSDB_NAMESPACE {
 
 // 二级索引混入类：为事务类添加自动维护二级索引的能力
@@ -552,9 +553,9 @@ class SecondaryIndexMixin : public Txn {
     autovector<IndexData> applicable_indices;
 
     {
-      // 核心函数
+      // 核心函数，好消息，和事务底层无关
       const Status s = UpdatePrimaryColumnValues(column_family, primary_key,
-                                                 primary_value_or_columns,  // cfh1，label(id)，宽列数据
+                                                 primary_value_or_columns,  // cfh1，label(id)，宽列数据，最后宽列数据的值可能会被改变
                                                  applicable_indices);
       if (!s.ok()) {  
         return s;
@@ -657,7 +658,7 @@ class SecondaryIndexMixin : public Txn {
         });
   }
 
-  const std::vector<std::shared_ptr<SecondaryIndex>>* secondary_indices_;
+  const std::vector<std::shared_ptr<SecondaryIndex>>* secondary_indices_;   // 私有成员变量，存储二级索引列表
 };
 
 }  // namespace ROCKSDB_NAMESPACE

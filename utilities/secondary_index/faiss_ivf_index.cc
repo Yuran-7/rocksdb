@@ -250,7 +250,7 @@ Slice FaissIVFIndex::GetPrimaryColumnName() const {
 Status FaissIVFIndex::UpdatePrimaryColumnValue(
     const Slice& /* primary_key */, const Slice& primary_column_value,
     std::optional<std::variant<Slice, std::string>>* updated_column_value)
-    const {
+    const { 
   assert(updated_column_value);
 
   // 将Slice转换为float数组
@@ -328,7 +328,7 @@ Status FaissIVFIndex::GetSecondaryValue(
       ConvertSliceToFloats(original_column_value, index_->d);
   assert(embedding);
 
-  constexpr faiss::idx_t* xids = nullptr;
+  constexpr faiss::idx_t* xids = nullptr;   // 是外部ID数组，用于为添加的向量指定自定义ID
   std::string code_str;
 
   try {

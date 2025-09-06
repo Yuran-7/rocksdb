@@ -62,14 +62,14 @@ int main(int argc, char* argv[]) {
     txn_db_options.secondary_indices.emplace_back(faiss_ivf_index); // 可以有多个二级索引，这里添加 FAISS 索引
 
     TransactionDB* db = nullptr;
-    TransactionDB::Open(options, txn_db_options, db_path, &db); // 最终db应该是WriteCommittedTxnDB类型的
+    TransactionDB::Open(options, txn_db_options, db_path, &db); // 最终db应该是WriteCommittedTxnDB类型的，在Open的调用链中，会一直把txn_db_options传给db做它的成员变量
     std::unique_ptr<TransactionDB> db_guard(db);
 
     ColumnFamilyOptions cf1_opts;
     cf1_opts.write_buffer_size = 16 * 1024 * 1024;
     cf1_opts.target_file_size_base = 32 * 1024 * 1024;
     ColumnFamilyHandle* cfh1 = nullptr;
-    db->CreateColumnFamily(cf1_opts, "cf1", &cfh1);
+    db->CreateColumnFamily(cf1_opts, "cf1", &cfh1); // DB抽象类的虚函数
     std::unique_ptr<ColumnFamilyHandle> cfh1_guard(cfh1);
 
     ColumnFamilyOptions cf2_opts;
@@ -89,6 +89,7 @@ int main(int argc, char* argv[]) {
         const size_t batch_size = 10000; // 每 10000 次写入提交一次事务
         // 在 TransactionDB 的基类声明的BeginTransaction函数有三个参数，其中两个有默认参数，所以这里只需要填一个参数即可
         // 此时txn是SecondaryIndexMixin<WriteCommittedTxn>类型的，SecondaryIndexMixin继承WriteCommittedTxn
+        // 因为我们在前面给txn_db_options添加了二级索引，所以这里的事务对象才会SecondaryIndexMixin，如果没添加，就是WriteCommittedTxn类型的
         std::unique_ptr<Transaction> txn(db->BeginTransaction(WriteOptions()));
 
         for (faiss::idx_t i = 0; i < num_vectors; ++i) {

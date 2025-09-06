@@ -41,14 +41,12 @@ constexpr uint32_t kInitialMaxDeadlocks = 5;
 class LockManager;
 struct RangeLockInfo;
 
-// A lock manager handle
-// The workflow is as follows:
-//  * Use a factory method (like NewRangeLockManager()) to create a lock
-//    manager and get its handle.
-//  * A Handle for a particular kind of lock manager will have extra
-//    methods and parameters to control the lock manager
-//  * Pass the handle to RocksDB in TransactionDBOptions::lock_mgr_handle. It
-//    will be used to perform locking.
+// 锁管理器句柄（控制锁机制的接口）
+// 使用流程如下：
+//  1. 使用工厂方法（例如 NewRangeLockManager()）创建特定类型的锁管理器，并获取其句柄
+//  2. 每种特定锁管理器的句柄都会提供额外的方法和参数来精细控制锁行为
+//  3. 将句柄通过 TransactionDBOptions::lock_mgr_handle 传递给 RocksDB，
+//     后续的锁操作都将通过这个句柄来执行
 class LockManagerHandle {
  public:
   // PessimisticTransactionDB will call this to get the Lock Manager it's going

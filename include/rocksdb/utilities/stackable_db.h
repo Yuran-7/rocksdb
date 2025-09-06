@@ -16,7 +16,22 @@
 #endif
 
 namespace ROCKSDB_NAMESPACE {
-// StackableDB是一个典型的装饰器模式，继承接口 + 组合接口实例
+/*
+    StackableDB是一个典型的装饰器模式，继承接口 + 组合接口实例
+    StackableDB不是抽象类，它把DB的虚函数都重写了一遍（至少把纯虚函数重写了）
+    StackableDB理论上可以实例化，但没有意义
+*/
+
+/*
+    // 1. 语法上可以实例化
+    DB* some_db = // 某个实际的DB实例 ;
+    StackableDB stackable_db(some_db);  // ✅ 编译通过
+    // 2. 但这样做没有意义
+    stackable_db.Put(write_options, cf, key, value);
+    // 这等价于：
+    some_db->Put(write_options, cf, key, value);
+    // 没有添加任何功能，只是多了一层转发
+*/
 
 // This class contains APIs to stack rocksdb wrappers.Eg. Stack TTL over base d
 class StackableDB : public DB { // Stackable（可堆叠的）：意思是这种 DB 可以像积木一样“叠加”在一个基础 DB 之上

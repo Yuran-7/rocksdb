@@ -332,13 +332,19 @@ class DB {
 
   // EXPERIMENTAL
 
-  // Open a database as a follower. The difference between this and opening
-  // as secondary is that the follower database has its own directory with
-  // links to the actual files, and can tolarate obsolete file deletions by
-  // the leader to its own database. Another difference is the follower
-  // tries to keep up with the leader by periodically tailing the leader's
-  // MANIFEST, and (in the future) memtable updates, rather than relying on
-  // the user to manually call TryCatchupWithPrimary().
+    /*
+    打开一个数据库作为 follower（从库）。
+    它和 secondary（只读副本） 的区别在于：
+
+    目录不同：
+    follower 数据库有自己独立的目录，但里面通过链接（硬链接/软链接）指向主库的实际文件。这样即使主库删除了旧文件，follower 也能在自己的目录中继续容忍这些删除。
+
+    同步方式不同：
+
+    secondary：需要用户手动调用 TryCatchupWithPrimary() 来和主库保持同步。
+
+    follower：会自动定期追踪（tail）主库的 MANIFEST 文件（记录文件元数据的日志），并且未来还会支持追踪主库的 memtable 更新，从而自动跟上主库的变化。
+    */
 
   // Open as a follower with the default column family
   static Status OpenAsFollower(const Options& options, const std::string& name,
@@ -406,7 +412,7 @@ class DB {
   // auto-resume is in progress, without waiting for it to complete.
   // See DBOptions::max_bgerror_resume_count and
   // EventListener::OnErrorRecoveryBegin
-  virtual Status Resume() { return Status::NotSupported(); }
+  virtual Status Resume() { return Status::NotSupported(); }    // 恢复
 
   // Close the DB by releasing resources, closing files etc. This should be
   // called before calling the destructor so that the caller can get back a
@@ -436,7 +442,7 @@ class DB {
                                    std::vector<std::string>* column_families);
 
   // Abstract class ctor
-  DB() {}
+  DB() {}   // 抽象类虽然不能被实例化，但它拥有构造函数，并且这个构造函数是会被调用的
   // No copying allowed
   DB(const DB&) = delete;
   void operator=(const DB&) = delete;
@@ -497,7 +503,7 @@ class DB {
   // Note: consider setting options.sync = true.
   virtual Status Put(const WriteOptions& options,
                      ColumnFamilyHandle* column_family, const Slice& key,
-                     const Slice& value) = 0;
+                     const Slice& value) = 0;   // 纯虚函数也可以有默认实现，位于db_impl_write.cc
   virtual Status Put(const WriteOptions& options,
                      ColumnFamilyHandle* column_family, const Slice& key,
                      const Slice& ts, const Slice& value) = 0;
@@ -637,14 +643,23 @@ class DB {
   }
 
   // EXPERIMENTAL, subject to change
-  // Ingest a WriteBatchWithIndex into DB, bypassing memtable writes for better
-  // write performance. Useful when there is a large number of updates
-  // in the write batch.
-  // The WriteBatchWithIndex must be created with overwrite_key=true.
-  // Currently this requires WriteOptions::disableWAL=true.
-  // The following options are currently not supported:
-  // - unordered_write
-  // - enable_pipelined_write
+  /*
+    IngestWriteBatchWithIndex 的作用是：
+    把一个 WriteBatchWithIndex 直接写入数据库，跳过 memtable，这样能提升写入性能。
+    特别适合一次性有大量更新的场景。
+
+    使用限制：
+
+    WriteBatchWithIndex 必须在创建时设置 overwrite_key = true。
+
+    目前必须设置 WriteOptions::disableWAL = true。
+
+    以下选项暂时不支持：
+
+    unordered_write
+
+    enable_pipelined_write
+  */
   virtual Status IngestWriteBatchWithIndex(
       const WriteOptions& /*options*/,
       std::shared_ptr<WriteBatchWithIndex> /*wbwi*/) {
