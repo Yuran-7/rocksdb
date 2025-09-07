@@ -13,3 +13,4 @@ faiss_db
 faiss_runner
 faiss_search
 faiss_search_db
+multithread_transaction
