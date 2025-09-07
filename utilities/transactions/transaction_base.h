@@ -428,7 +428,7 @@ class TransactionBaseImpl : public Transaction {
   };
 
   // Records writes pending in this transaction
-  WriteBatchWithIndex write_batch_;
+  WriteBatchWithIndex write_batch_; // include/rocksdb/utilities/write_batch_with_index.h，在 WriteBatch 基础上增加了一个 跳表索引，事务就可以在执行 Put/GetForUpdate 时，先查这个 batch，做到“读到未提交写入”
 
   // For Pessimistic Transactions this is the set of acquired locks.
   // Optimistic Transactions will keep note the requested locks (not actually

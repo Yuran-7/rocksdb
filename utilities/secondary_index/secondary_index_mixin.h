@@ -215,7 +215,7 @@ class SecondaryIndexMixin : public Txn {
   // 带保存点执行操作：失败时自动回滚
   template <typename Operation>
   Status PerformWithSavePoint(Operation&& operation) {   // 转发引用的语法，条件1: 这是一个函数模板， 条件2: 参数形式为 T&&
-    // utilities/transactions/transaction_base.cc内的void TransactionBaseImpl::SetSavePoint()函数
+    // utilities/transactions/transaction_base.cc内的void TransactionBaseImpl::SetSavePoint()成员函数
     // 要加::，不然编译会报错，详情请看examples/demo1.cpp
     Txn::SetSavePoint();
 
@@ -224,13 +224,13 @@ class SecondaryIndexMixin : public Txn {
     if (!s.ok()) {
       [[maybe_unused]] const Status st = Txn::RollbackToSavePoint();
       assert(st.ok());
-
+      // 失败时回滚，这会释放锁
       return s;
     }
 
     [[maybe_unused]] const Status st = Txn::PopSavePoint();
     assert(st.ok());
-
+    // 成功时提交，锁在事务完成后释放
     return Status::OK();
   }
 
@@ -242,7 +242,7 @@ class SecondaryIndexMixin : public Txn {
     assert(column_family);
     assert(existing_primary_columns);
 
-    constexpr bool exclusive = true;
+    constexpr bool exclusive = true;    // 获取排他锁
 
     return Txn::GetEntityForUpdate(ReadOptions(), column_family, primary_key,
                                    existing_primary_columns, exclusive,
