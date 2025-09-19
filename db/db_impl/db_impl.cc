@@ -4820,12 +4820,14 @@ Status DBImpl::GetApproximateSizes(const SizeApproximationOptions& options,
     InternalKey k1(start.value(), kMaxSequenceNumber, kValueTypeForSeek);
     InternalKey k2(limit.value(), kMaxSequenceNumber, kValueTypeForSeek);
     sizes[i] = 0;
+    // 1. 估算SST文件中的大小
     if (options.include_files) {
       sizes[i] += versions_->ApproximateSize(
           options, read_options, v, k1.Encode(), k2.Encode(),
           /*start_level=*/0,
           /*end_level=*/-1, TableReaderCaller::kUserApproximateSize);
     }
+    // 2. 估算内存表中的大小
     if (options.include_memtables) {
       sizes[i] += sv->mem->ApproximateStats(k1.Encode(), k2.Encode()).size;
       sizes[i] += sv->imm->ApproximateStats(k1.Encode(), k2.Encode()).size;

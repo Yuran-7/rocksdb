@@ -43,8 +43,8 @@ class BlockBasedTableBuilder : public TableBuilder {
   // building in *file.  Does not close the file.  It is up to the
   // caller to close the file after calling Finish().
   BlockBasedTableBuilder(const BlockBasedTableOptions& table_options,
-                         const TableBuilderOptions& table_builder_options,
-                         WritableFileWriter* file);
+                         const TableBuilderOptions& table_builder_options,  // 位于table/table_builder.h
+                         WritableFileWriter* file); // 位于file/writable_file_writer.h
 
   // No copying allowed
   BlockBasedTableBuilder(const BlockBasedTableBuilder&) = delete;
